@@ -1,0 +1,8 @@
+{
+  "name": "Jangoes",
+  "description": "A comprehensive logistics and delivery management application for both customers and drivers, featuring real-time tracking, wallet management, and an intelligent support system.",
+  "requestFramePermissions": [
+    "geolocation",
+    "camera"
+  ]
+}

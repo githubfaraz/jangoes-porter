@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">Jangoes Porter</string>
+    <string name="title_activity_main">Jangoes Porter</string>
+    <string name="package_name">com.jangoes.porter</string>
+    <string name="custom_url_scheme">com.jangoes.porter</string>
+</resources>

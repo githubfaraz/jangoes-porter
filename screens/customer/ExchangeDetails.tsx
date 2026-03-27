@@ -1,0 +1,241 @@
+import React, { useState } from 'react';
+import { useNavigate, useLocation } from 'react-router-dom';
+
+const CATEGORIES = ['Electronics', 'Clothing', 'Documents', 'Furniture', 'Food', 'Other'];
+
+const ExchangeDetails: React.FC = () => {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const bookingState = location.state || {};
+
+  const [productA, setProductA] = useState({ description: '', category: '' });
+  const [productB, setProductB] = useState({ description: '', category: '' });
+  const [qcRequired, setQcRequired] = useState(false);
+  const [qcInstructions, setQcInstructions] = useState('');
+  const [weight, setWeight] = useState('');
+
+  const isFormValid =
+    productA.description.trim().length > 2 &&
+    productA.category !== '' &&
+    productB.description.trim().length > 2 &&
+    productB.category !== '' &&
+    parseFloat(weight) > 0;
+
+  const handleContinue = () => {
+    navigate('/vehicles', {
+      state: {
+        ...bookingState,
+        serviceType: 'exchange',
+        exchange: { productA, productB, qcRequired, qcInstructions: qcRequired ? qcInstructions : '' },
+        dimensions: { chargeableWeight: parseFloat(weight), estimatedCost: 0 },
+      },
+    });
+  };
+
+  return (
+    <div className="flex flex-col h-full bg-background-light dark:bg-background-dark min-h-screen">
+      <header className="fixed top-0 left-0 right-0 max-w-md mx-auto z-[100] bg-white dark:bg-surface-dark px-4 py-3 flex items-center justify-between shadow-sm">
+        <button
+          onClick={() => navigate('/search')}
+          className="p-3 -ml-2 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors active:scale-90"
+        >
+          <span className="material-symbols-outlined text-slate-700 dark:text-white">arrow_back</span>
+        </button>
+        <h2 className="text-lg font-bold">Exchange Details</h2>
+        <div className="w-10"></div>
+      </header>
+
+      <main className="flex-1 overflow-y-auto no-scrollbar p-6 flex flex-col gap-6 pt-20 pb-40">
+        {/* Title */}
+        <div className="flex flex-col gap-2">
+          <h1 className="text-2xl font-black leading-tight tracking-tight">Set up your exchange</h1>
+          <p className="text-sm text-slate-500 font-medium">Tell us what you're sending and what you expect back.</p>
+        </div>
+
+        {/* Exchange visual indicator */}
+        <div className="flex items-center justify-center gap-3 py-3">
+          <div className="flex flex-col items-center gap-1">
+            <div className="size-10 bg-primary/10 rounded-xl flex items-center justify-center">
+              <span className="material-symbols-outlined text-primary filled">inventory_2</span>
+            </div>
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">You Send</span>
+          </div>
+          <div className="size-10 bg-primary rounded-full flex items-center justify-center shadow-lg shadow-primary/30">
+            <span className="material-symbols-outlined text-white text-xl">swap_horiz</span>
+          </div>
+          <div className="flex flex-col items-center gap-1">
+            <div className="size-10 bg-emerald-500/10 rounded-xl flex items-center justify-center">
+              <span className="material-symbols-outlined text-emerald-500 filled">package_2</span>
+            </div>
+            <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">You Get</span>
+          </div>
+        </div>
+
+        {/* Product A Card */}
+        <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 border border-primary/20 shadow-xl shadow-primary/5 flex flex-col gap-5">
+          <div className="flex items-center gap-2">
+            <div className="size-6 bg-primary/10 rounded-lg flex items-center justify-center">
+              <span className="material-symbols-outlined text-primary text-sm filled">upload</span>
+            </div>
+            <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Product A — You're Sending</h3>
+          </div>
+
+          <div className="flex flex-col gap-4">
+            <div className="relative">
+              <textarea
+                value={productA.description}
+                onChange={(e) => setProductA({ ...productA, description: e.target.value })}
+                className="w-full h-24 bg-white dark:bg-slate-900 border-2 border-slate-100 dark:border-slate-700 rounded-3xl p-5 text-base font-medium focus:ring-primary/20 focus:border-primary transition-all resize-none shadow-sm placeholder:text-slate-300 dark:placeholder:text-slate-600"
+                placeholder="Describe the item you're sending (e.g., iPhone 14 Pro, 128GB, Space Black)"
+              />
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Category</span>
+              <div className="flex flex-wrap gap-2">
+                {CATEGORIES.map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => setProductA({ ...productA, category: cat })}
+                    className={`px-4 py-2.5 rounded-2xl border text-xs font-bold transition-all active:scale-95 shadow-sm ${
+                      productA.category === cat
+                        ? 'bg-primary text-white border-primary shadow-lg shadow-primary/20'
+                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-primary hover:text-primary hover:bg-primary/5'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Product B Card */}
+        <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 border border-emerald-500/20 shadow-xl shadow-emerald-500/5 flex flex-col gap-5">
+          <div className="flex items-center gap-2">
+            <div className="size-6 bg-emerald-500/10 rounded-lg flex items-center justify-center">
+              <span className="material-symbols-outlined text-emerald-500 text-sm filled">download</span>
+            </div>
+            <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Product B — You Want Back</h3>
+          </div>
+
+          <div className="flex flex-col gap-4">
+            <div className="relative">
+              <textarea
+                value={productB.description}
+                onChange={(e) => setProductB({ ...productB, description: e.target.value })}
+                className="w-full h-24 bg-white dark:bg-slate-900 border-2 border-slate-100 dark:border-slate-700 rounded-3xl p-5 text-base font-medium focus:ring-primary/20 focus:border-primary transition-all resize-none shadow-sm placeholder:text-slate-300 dark:placeholder:text-slate-600"
+                placeholder="Describe the item you expect back (e.g., Samsung Galaxy S24, 256GB, Cream)"
+              />
+            </div>
+
+            <div className="flex flex-col gap-2">
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">Category</span>
+              <div className="flex flex-wrap gap-2">
+                {CATEGORIES.map((cat) => (
+                  <button
+                    key={cat}
+                    onClick={() => setProductB({ ...productB, category: cat })}
+                    className={`px-4 py-2.5 rounded-2xl border text-xs font-bold transition-all active:scale-95 shadow-sm ${
+                      productB.category === cat
+                        ? 'bg-emerald-500 text-white border-emerald-500 shadow-lg shadow-emerald-500/20'
+                        : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-700 text-slate-700 dark:text-slate-300 hover:border-emerald-500 hover:text-emerald-500 hover:bg-emerald-500/5'
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* Quality Check Toggle */}
+        <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 border border-slate-100 dark:border-slate-700 shadow-sm flex flex-col gap-5">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <div className="size-10 bg-amber-500/10 rounded-xl flex items-center justify-center">
+                <span className="material-symbols-outlined text-amber-500 filled">verified</span>
+              </div>
+              <div className="flex flex-col">
+                <span className="text-sm font-black text-slate-900 dark:text-white">Quality Check</span>
+                <span className="text-[10px] text-slate-400 font-medium">Driver verifies items before exchange</span>
+              </div>
+            </div>
+            <button
+              onClick={() => setQcRequired(!qcRequired)}
+              className={`relative w-14 h-8 rounded-full transition-all duration-300 ${
+                qcRequired ? 'bg-primary shadow-inner shadow-primary/30' : 'bg-slate-200 dark:bg-slate-700'
+              }`}
+            >
+              <div
+                className={`absolute top-1 size-6 bg-white rounded-full shadow-md transition-all duration-300 ${
+                  qcRequired ? 'left-7' : 'left-1'
+                }`}
+              />
+            </button>
+          </div>
+
+          {qcRequired && (
+            <div className="flex flex-col gap-2 animate-in fade-in slide-in-from-top-2 duration-300">
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">QC Instructions</span>
+              <textarea
+                value={qcInstructions}
+                onChange={(e) => setQcInstructions(e.target.value)}
+                className="w-full h-28 bg-white dark:bg-slate-900 border-2 border-amber-200 dark:border-amber-900/30 rounded-3xl p-5 text-base font-medium focus:ring-amber-500/20 focus:border-amber-500 transition-all resize-none shadow-sm placeholder:text-slate-300 dark:placeholder:text-slate-600"
+                placeholder="e.g., Check if screen is cracked, verify serial number matches, ensure all accessories are included..."
+              />
+              <p className="text-[9px] text-slate-400 font-medium ml-1 flex items-center gap-1">
+                <span className="material-symbols-outlined text-xs">info</span>
+                The driver will follow these instructions before completing the exchange.
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* Estimated Weight */}
+        <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 border border-slate-100 dark:border-slate-700 shadow-sm flex flex-col gap-4">
+          <div className="flex items-center gap-2">
+            <div className="size-6 bg-primary/10 rounded-lg flex items-center justify-center">
+              <span className="material-symbols-outlined text-primary text-sm filled">scale</span>
+            </div>
+            <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Estimated Weight</h3>
+          </div>
+
+          <div className="relative">
+            <input
+              type="number"
+              inputMode="decimal"
+              value={weight}
+              onChange={(e) => setWeight(e.target.value)}
+              min="0.1"
+              step="0.1"
+              className="w-full bg-white dark:bg-slate-900 border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-5 py-4 text-base font-bold focus:ring-primary/20 focus:border-primary transition-all shadow-sm placeholder:text-slate-300 dark:placeholder:text-slate-600 pr-14"
+              placeholder="0.0"
+            />
+            <span className="absolute right-5 top-1/2 -translate-y-1/2 text-sm font-black text-slate-400">KG</span>
+          </div>
+
+          <p className="text-[9px] text-slate-400 font-medium ml-1 flex items-center gap-1">
+            <span className="material-symbols-outlined text-xs">info</span>
+            Combined weight of both items. Used for fare calculation.
+          </p>
+        </div>
+      </main>
+
+      <footer className="fixed bottom-0 left-0 right-0 max-w-md mx-auto p-4 bg-white/95 dark:bg-surface-dark/95 backdrop-blur-md border-t border-slate-100 dark:border-slate-800 z-[60] shadow-[0_-10px_30px_rgba(0,0,0,0.05)]">
+        <button
+          onClick={handleContinue}
+          disabled={!isFormValid}
+          className="w-full bg-primary hover:bg-primary-dark disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 text-white font-black h-16 rounded-[24px] shadow-2xl shadow-primary/20 flex items-center justify-center gap-3 transition-all active:scale-[0.98]"
+        >
+          <span className="text-base uppercase tracking-widest font-bold">Continue</span>
+          <span className="material-symbols-outlined font-black">arrow_forward</span>
+        </button>
+      </footer>
+    </div>
+  );
+};
+
+export default ExchangeDetails;
