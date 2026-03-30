@@ -4,6 +4,7 @@ import { db } from '../../src/firebase.ts';
 import { doc, onSnapshot, updateDoc, getDoc } from 'firebase/firestore';
 import { uploadToCloudinary } from '../../services/cloudinaryUpload.ts';
 import { BookingStatus, Trip } from '../../types.ts';
+import { getVehicleRates, calculateFinalFare } from '../../services/fareService.ts';
 import ExchangeTrip from './ExchangeTrip.tsx';
 
 enum TripStep {
@@ -115,8 +116,9 @@ const ActiveTrip: React.FC = () => {
         ...extraData,
         updatedAt: new Date().toISOString()
       });
-    } catch (error) {
-      console.error("Update Trip Error:", error);
+    } catch (error: any) {
+      console.error("Update Trip Error:", error?.code, error?.message);
+      alert("Update failed: " + (error?.message || 'Unknown error'));
     }
   };
 
@@ -132,8 +134,7 @@ const ActiveTrip: React.FC = () => {
   };
 
   const handleArrivedAtPickup = () => {
-    updateTripStatus(BookingStatus.ARRIVED_AT_PICKUP);
-    sendNotification("Arrived", "Rider has reached your location for pickup.");
+    updateTripStatus(BookingStatus.ARRIVED_AT_PICKUP, { arrivedAtPickupAt: new Date().toISOString() });
   };
 
   const handleStartPickup = () => {
@@ -177,24 +178,68 @@ const ActiveTrip: React.FC = () => {
       alert("Invalid PIN.");
       return;
     }
-    updateTripStatus(BookingStatus.IN_TRANSIT, { parcelImageUrl: parcelImage });
-    sendNotification("Trip Started", `Your package is on the way! OTP for receiver: ${trip?.dropoffOtp}`);
+    updateTripStatus(BookingStatus.IN_TRANSIT, { parcelImageUrl: parcelImage, tripStartedAt: new Date().toISOString() });
   };
 
   const handleArrivedAtDestination = () => {
-    updateTripStatus(BookingStatus.ARRIVED_AT_DESTINATION);
-    sendNotification("Arrived", "Rider has reached the destination location.");
+    updateTripStatus(BookingStatus.ARRIVED_AT_DESTINATION, { arrivedAtDestinationAt: new Date().toISOString() });
   };
 
   const handleStartDropoff = () => {
     updateTripStatus(BookingStatus.DROPPING_OFF);
   };
 
-  const handleCompleteTrip = () => {
-    if (dropoffOtpInput === trip?.dropoffOtp) {
-      updateTripStatus(BookingStatus.COMPLETED);
-    } else {
-      alert("Invalid OTP.");
+  const handleCompleteTrip = async () => {
+
+    const completedAt = new Date().toISOString();
+    const extraData: Record<string, any> = { completedAt };
+
+    // Calculate final fare with actual waiting charges (V2 trips only)
+    if (trip?.fareVersion === 2 && trip.estimatedTripFare) {
+      try {
+        const rates = getVehicleRates();
+        const vehicleId = (trip as any).vehicleId || 'tata-ace';
+        const rate = rates[vehicleId] || rates['tata-ace'];
+
+        // Loading wait: time between arriving at pickup and starting trip
+        let loadingWaitMins = 0;
+        if (trip.arrivedAtPickupAt && trip.tripStartedAt) {
+          loadingWaitMins = (new Date(trip.tripStartedAt).getTime() - new Date(trip.arrivedAtPickupAt).getTime()) / 60000;
+        }
+
+        // Unloading wait: time between arriving at destination and completing
+        let unloadingWaitMins = 0;
+        if (trip.arrivedAtDestinationAt) {
+          unloadingWaitMins = (new Date(completedAt).getTime() - new Date(trip.arrivedAtDestinationAt).getTime()) / 60000;
+        }
+
+        const finalFare = calculateFinalFare(trip.estimatedTripFare, loadingWaitMins, unloadingWaitMins, rate);
+        extraData.finalFare = finalFare;
+        extraData.fare = finalFare.total; // update fare to final amount
+      } catch (err) {
+        console.error('Final fare calculation error:', err);
+      }
+    }
+
+    await updateTripStatus(BookingStatus.COMPLETED, extraData);
+
+    // Deduct fare from customer's wallet via server (only for wallet payments)
+    if (trip?.customerId && (trip as any).paymentMethod === 'wallet') {
+      const finalAmount = extraData.fare || trip.fare || 0;
+      try {
+        await fetch('/api/deduct-fare', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            customerId: trip.customerId,
+            amount: finalAmount,
+            tripId,
+            description: `Trip fare — ${trip.pickup?.address?.split(',')[0] || 'Pickup'} to ${trip.dropoff?.address?.split(',')[0] || 'Drop'}`,
+          }),
+        });
+      } catch (err) {
+        console.error('Wallet deduction error:', err);
+      }
     }
   };
 
@@ -217,30 +262,45 @@ const ActiveTrip: React.FC = () => {
 
   if (step === TripStep.COMPLETED) {
     return (
-      <div className="min-h-screen w-full bg-white flex flex-col items-center justify-center p-8 text-center animate-in fade-in duration-500">
-        <div className="size-24 rounded-full bg-green-100 flex items-center justify-center text-green-600 mb-6">
+      <div className="min-h-screen w-full bg-white dark:bg-slate-950 flex flex-col items-center justify-center p-8 text-center animate-in fade-in duration-500">
+        <div className="size-24 rounded-full bg-green-100 dark:bg-green-900/30 flex items-center justify-center text-green-600 mb-6">
           <span className="material-symbols-outlined text-5xl filled">check_circle</span>
         </div>
-        <h2 className="text-3xl font-black mb-2">Trip Completed!</h2>
-        <p className="text-slate-500 mb-8">You've successfully delivered the parcel. Great job!</p>
-        
-        <div className="w-full bg-slate-50 rounded-3xl p-6 mb-8">
-          <div className="flex justify-between mb-4">
-            <span className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">Earnings</span>
-            <span className="font-black text-xl">₹{trip?.fare?.toFixed(2) || '0.00'}</span>
+        <h2 className="text-3xl font-black mb-2 text-slate-900 dark:text-white">Trip Completed!</h2>
+        <p className="text-slate-500 mb-2">You've successfully delivered the parcel. Great job!</p>
+
+        <div className="w-full bg-slate-50 dark:bg-slate-900 rounded-3xl p-6 mb-8">
+          <div className="flex justify-between mb-3">
+            <span className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">Total Earnings</span>
+            <span className="font-black text-xl text-slate-900 dark:text-white">₹{trip?.fare?.toFixed(2) || '0.00'}</span>
           </div>
-          <div className="h-px bg-slate-200 w-full mb-4"></div>
-          <div className="flex flex-col gap-2">
-            <p className="text-xs font-bold text-slate-400 uppercase tracking-widest">Rate the Customer</p>
-            <div className="flex justify-center gap-2">
-              {[1, 2, 3, 4, 5].map(i => (
-                <span key={i} className="material-symbols-outlined text-amber-400 text-3xl cursor-pointer">star</span>
-              ))}
+          {trip?.finalFare && (
+            <div className="flex flex-col gap-1.5 text-xs border-t border-slate-200 dark:border-slate-700 pt-3">
+              <div className="flex justify-between text-slate-500">
+                <span>Trip Fare</span>
+                <span className="font-bold">₹{trip.finalFare.tripFare}</span>
+              </div>
+              {trip.finalFare.loadingWaitCharge > 0 && (
+                <div className="flex justify-between text-slate-500">
+                  <span>Loading Wait ({trip.finalFare.loadingWaitMins} min)</span>
+                  <span className="font-bold">+₹{trip.finalFare.loadingWaitCharge}</span>
+                </div>
+              )}
+              {trip.finalFare.unloadingWaitCharge > 0 && (
+                <div className="flex justify-between text-slate-500">
+                  <span>Unloading Wait ({trip.finalFare.unloadingWaitMins} min)</span>
+                  <span className="font-bold">+₹{trip.finalFare.unloadingWaitCharge}</span>
+                </div>
+              )}
+              <div className="flex justify-between text-slate-500">
+                <span>GST (5%)</span>
+                <span className="font-bold">₹{trip.finalFare.gst}</span>
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
-        <button 
+        <button
           onClick={() => navigate('/dashboard')}
           className="w-full h-16 bg-primary text-white font-black rounded-2xl shadow-xl shadow-primary/30"
         >
@@ -304,14 +364,16 @@ const ActiveTrip: React.FC = () => {
                   <span className="material-symbols-outlined text-slate-400 text-2xl">person</span>
                 </div>
               )}
-              <div className="flex flex-col">
-                <h3 className="font-bold text-lg leading-tight dark:text-white">{customerName || trip?.senderName || 'Customer'}</h3>
-                <p className="text-xs text-slate-500">{trip?.vehicleType || 'Parcel Delivery'}</p>
+              <div className="flex flex-col flex-1 min-w-0">
+                <h3 className="font-bold text-lg leading-tight dark:text-white truncate">{customerName || trip?.senderName || 'Sender'}</h3>
+                <p className="text-xs text-slate-400">{trip?.senderPhone || trip?.pickup?.address || ''}</p>
               </div>
             </div>
-            <button className="size-12 bg-green-50 dark:bg-green-900/20 text-green-600 dark:text-green-400 rounded-full flex items-center justify-center">
-              <span className="material-symbols-outlined filled">call</span>
-            </button>
+            {trip?.senderPhone && (
+              <a href={`tel:${trip.senderPhone}`} className="flex items-center gap-2 h-10 px-4 bg-green-600 text-white rounded-xl text-xs font-bold shrink-0">
+                <span className="material-symbols-outlined text-sm filled">call</span>Call Sender
+              </a>
+            )}
           </div>
 
           {/* Trip Progress Steps */}
@@ -411,6 +473,7 @@ const ActiveTrip: React.FC = () => {
 
             {step === TripStep.IN_TRANSIT && (
               <div className="flex flex-col gap-4">
+                {/* Dropoff location */}
                 <div className="flex items-start gap-4">
                   <div className="size-3 rounded-full bg-red-500 mt-1.5 shrink-0 ring-4 ring-red-500/10"></div>
                   <div className="flex flex-col">
@@ -418,7 +481,43 @@ const ActiveTrip: React.FC = () => {
                     <span className="text-sm font-bold dark:text-white">{trip?.dropoff?.address || 'Loading...'}</span>
                   </div>
                 </div>
-                <button 
+
+                {/* Receiver details — prominent */}
+                <div className="bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-100 dark:border-slate-700">
+                  <p className="text-[9px] font-black text-primary uppercase tracking-widest mb-2">Receiver</p>
+                  <div className="flex items-center gap-3">
+                    <div className="size-10 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                      <span className="material-symbols-outlined text-primary text-xl">person</span>
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-base font-black text-slate-900 dark:text-white truncate">{trip?.receiverName || 'Receiver'}</p>
+                      <p className="text-xs text-slate-400">{trip?.receiverPhone || ''}</p>
+                    </div>
+                    {trip?.receiverPhone && (
+                      <a href={`tel:${trip.receiverPhone}`} className="flex items-center gap-1.5 h-9 px-3 bg-green-600 text-white rounded-xl text-xs font-bold shrink-0">
+                        <span className="material-symbols-outlined text-sm filled">call</span>Call
+                      </a>
+                    )}
+                  </div>
+                </div>
+
+                {/* Sender details — smaller */}
+                <div className="flex items-center gap-3 px-2">
+                  <div className="size-7 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center shrink-0">
+                    <span className="material-symbols-outlined text-slate-400 text-sm">person</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs text-slate-400">Sender: <span className="font-semibold text-slate-600 dark:text-slate-300">{trip?.senderName || 'Sender'}</span></p>
+                    <p className="text-[10px] text-slate-300">{trip?.senderPhone || ''}</p>
+                  </div>
+                  {trip?.senderPhone && (
+                    <a href={`tel:${trip.senderPhone}`} className="size-7 rounded-full bg-slate-100 dark:bg-slate-700 flex items-center justify-center shrink-0">
+                      <span className="material-symbols-outlined text-slate-400 text-xs filled">call</span>
+                    </a>
+                  )}
+                </div>
+
+                <button
                   onClick={handleArrivedAtDestination}
                   className="w-full h-14 bg-primary text-white font-black rounded-2xl shadow-lg shadow-primary/20 flex items-center justify-center gap-2"
                 >
@@ -443,33 +542,33 @@ const ActiveTrip: React.FC = () => {
             )}
 
             {step === TripStep.DROPPING_OFF && (
-              <div className="flex flex-col gap-6">
-                <div className="flex flex-col gap-2">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Enter Receiver OTP ({trip?.dropoffOtp})</label>
-                  <input 
-                    type="text"
-                    maxLength={4}
-                    value={dropoffOtpInput}
-                    onChange={(e) => setDropoffOtpInput(e.target.value)}
-                    className="w-full h-14 bg-white dark:bg-slate-900 border-2 border-slate-100 dark:border-slate-800 rounded-2xl px-5 text-center text-2xl font-black tracking-[0.5em] focus:border-primary transition-all"
-                    placeholder="----"
-                  />
+              <div className="flex flex-col gap-4">
+                <div className="p-4 bg-green-50 dark:bg-green-900/10 rounded-2xl border border-green-100 dark:border-green-900/20 text-center">
+                  <p className="text-xs font-bold text-green-600 uppercase tracking-widest">Ready to Deliver</p>
                 </div>
 
-                <div className="flex gap-4">
-                  <button 
-                    onClick={handleResendOtp}
-                    className="flex-1 h-14 bg-slate-100 dark:bg-slate-800 text-slate-500 font-black rounded-2xl text-[10px] uppercase tracking-widest"
-                  >
-                    Resend OTP
-                  </button>
-                  <button 
-                    onClick={handleCompleteTrip}
-                    className="flex-[2] h-14 bg-primary text-white font-black rounded-2xl shadow-lg shadow-primary/20"
-                  >
-                    COMPLETE TRIP
-                  </button>
+                <div className="flex items-center gap-4">
+                  <div className="size-10 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center shrink-0">
+                    <span className="material-symbols-outlined text-slate-400">person</span>
+                  </div>
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-bold text-slate-900 dark:text-white truncate">{trip?.receiverName || 'Receiver'}</p>
+                    <p className="text-xs text-slate-400">{trip?.receiverPhone || ''}</p>
+                  </div>
+                  {trip?.receiverPhone && (
+                    <a href={`tel:${trip.receiverPhone}`} className="flex items-center gap-2 h-10 px-4 bg-green-600 text-white rounded-xl text-xs font-bold shrink-0">
+                      <span className="material-symbols-outlined text-sm filled">call</span>Call Receiver
+                    </a>
+                  )}
                 </div>
+
+                <button
+                  onClick={handleCompleteTrip}
+                  className="w-full h-16 bg-primary text-white font-black rounded-2xl shadow-xl shadow-primary/30 flex items-center justify-center gap-2"
+                >
+                  <span className="material-symbols-outlined">verified</span>
+                  PARCEL DELIVERED
+                </button>
               </div>
             )}
           </div>
@@ -488,9 +587,9 @@ const ActiveTrip: React.FC = () => {
         </div>
       </div>
 
-      {/* In-App Notification Overlay */}
+      {/* In-App Notification Overlay — constrained to mobile viewport */}
       {showNotification && (
-        <div className="fixed top-14 left-4 right-4 z-[200] animate-in slide-in-from-top duration-500">
+        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-[200] w-full max-w-md px-4 animate-in slide-in-from-top duration-500">
           <div className="bg-slate-900 text-white p-4 rounded-2xl shadow-2xl border border-white/10 flex items-center gap-4">
             <div className="size-10 rounded-xl bg-primary flex items-center justify-center shrink-0">
               <span className="material-symbols-outlined">notifications_active</span>

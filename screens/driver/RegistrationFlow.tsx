@@ -14,7 +14,7 @@ const STEPS = [
   { id: 2, title: 'Aadhaar Front',   subtitle: '',                             icon: 'credit_card'    },
   { id: 3, title: 'Aadhaar Back',    subtitle: 'Address extraction',           icon: 'home_pin'       },
   { id: 4, title: 'PAN Card',        subtitle: 'Front image upload',           icon: 'badge'          },
-  { id: 5, title: 'Driving License', subtitle: 'Number & date of birth',       icon: 'id_card'        },
+  { id: 5, title: 'Driving License', subtitle: 'State & license number',        icon: 'id_card'        },
   { id: 6, title: 'RC Verification',   subtitle: 'Vehicle registration number', icon: 'directions_car' },
   { id: 7, title: 'Vehicle Photos',    subtitle: 'Min 3, max 6 images',         icon: 'photo_camera'   },
   { id: 8, title: 'Your Selfie',       subtitle: 'Clear photo of your face',     icon: 'face'           },
@@ -151,9 +151,10 @@ const RegistrationFlow: React.FC<RegistrationFlowProps> = ({ onComplete }) => {
   const [dlDob, setDlDob] = useState('');
   const [dlData, setDlData] = useState<any>(null);
 
-  // Step 6 — RC Verification
+  // Step 6 — RC Verification + Vehicle Category
   const [rcNumber, setRcNumber] = useState('');
   const [rcData, setRcData] = useState<any>(null);
+  const [vehicleCategory, setVehicleCategory] = useState('');
 
   // Step 7 — Vehicle Photos
   const vehicleInputRef = useRef<HTMLInputElement>(null);
@@ -219,6 +220,7 @@ const RegistrationFlow: React.FC<RegistrationFlowProps> = ({ onComplete }) => {
         });
         if (kd.rcNumber) setRcNumber(kd.rcNumber);
       }
+      if (d.vehicleCategory) setVehicleCategory(d.vehicleCategory);
       if (kd.vehiclePhotos?.length) {
         setVehicleUploaded(true);
       }
@@ -244,7 +246,7 @@ const RegistrationFlow: React.FC<RegistrationFlowProps> = ({ onComplete }) => {
     if (step === 3) return !!backData;
     if (step === 4) return !!panData;
     if (step === 5) return !!dlData;
-    if (step === 6) return !!rcData;
+    if (step === 6) return !!rcData && !!vehicleCategory;
     if (step === 7) return vehicleUploaded;
     if (step === 8) return selfieUploaded;
     return false;
@@ -408,7 +410,9 @@ const RegistrationFlow: React.FC<RegistrationFlowProps> = ({ onComplete }) => {
   const dlPrefix = selectedState ? `${selectedState.code}-` : '';
   const fullDlNumber = dlPrefix + dlNumber.trim();
 
-  const isDlFormReady = dlState !== '' && dlNumber.trim().length >= 3 && dlDob !== '';
+  // Use DOB from Aadhaar OCR automatically
+  const aadhaarDob = frontData?.dob || dlDob || '';
+  const isDlFormReady = dlState !== '' && dlNumber.trim().length >= 3 && aadhaarDob !== '';
 
   const handleDlVerify = async () => {
     if (!isDlFormReady) return;
@@ -417,7 +421,7 @@ const RegistrationFlow: React.FC<RegistrationFlowProps> = ({ onComplete }) => {
       const res = await fetch('/api/kyc/driving-license', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id_number: fullDlNumber, dob: dlDob }),
+        body: JSON.stringify({ id_number: fullDlNumber, dob: aadhaarDob }),
       });
       const data = await res.json();
 
@@ -1011,7 +1015,7 @@ const RegistrationFlow: React.FC<RegistrationFlowProps> = ({ onComplete }) => {
                 <div className="bg-slate-100 dark:bg-slate-800/60 rounded-2xl px-4 py-3 flex items-center gap-2">
                   <span className="material-symbols-outlined text-slate-500 text-xl">info</span>
                   <p className="text-slate-600 dark:text-slate-400 text-xs font-medium">
-                    Enter your DL issuing state, license number, and date of birth exactly as on your license.
+                    Enter your DL issuing state and license number exactly as on your license.
                   </p>
                 </div>
 
@@ -1057,18 +1061,6 @@ const RegistrationFlow: React.FC<RegistrationFlowProps> = ({ onComplete }) => {
                   )}
                 </div>
 
-                {/* Date of Birth */}
-                <div className="space-y-1.5">
-                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Date of Birth</label>
-                  <input
-                    type="date"
-                    value={dlDob}
-                    onChange={e => setDlDob(e.target.value)}
-                    max={new Date().toISOString().split('T')[0]}
-                    className="w-full h-14 bg-white dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-5 text-base font-bold focus:outline-none focus:border-primary"
-                  />
-                </div>
-
                 <button
                   onClick={handleDlVerify}
                   disabled={!isDlFormReady || loading}
@@ -1101,7 +1093,41 @@ const RegistrationFlow: React.FC<RegistrationFlowProps> = ({ onComplete }) => {
               ) : (
                 <PendingCard message="Your RC owner name doesn't match with Aadhaar card. Our team will review your document within 24–48 hours. You can continue with the verification process." />
               )
-            ) : (
+            ) : null}
+
+            {/* Vehicle Category Selector — shown after RC is verified */}
+            {rcData && (
+              <div className="space-y-3">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest">Select Your Vehicle Category</label>
+                <p className="text-xs text-slate-500 font-medium">This determines which bookings you'll receive. Choose the category that best matches your vehicle.</p>
+                <div className="grid grid-cols-2 gap-3">
+                  {[
+                    { id: 'bike', name: 'Two-Wheeler', icon: 'motorcycle', desc: 'Bike / Scooter' },
+                    { id: 'tata-ace', name: 'Mini Truck', icon: 'local_shipping', desc: 'Tata Ace / similar' },
+                    { id: 'bolero', name: 'Pickup Truck', icon: 'local_shipping', desc: 'Bolero / Dost' },
+                    { id: 'tata-407', name: 'Medium Truck', icon: 'local_shipping', desc: 'Tata 407 / similar' },
+                    { id: 'large-truck', name: 'Large Truck', icon: 'local_shipping', desc: 'Eicher / Canter' },
+                    { id: 'car', name: 'Car', icon: 'directions_car', desc: 'Sedan / Hatchback / SUV' },
+                  ].map(v => (
+                    <button
+                      key={v.id}
+                      onClick={() => setVehicleCategory(v.id)}
+                      className={`p-4 rounded-2xl border-2 flex flex-col items-center gap-2 transition-all active:scale-95 ${
+                        vehicleCategory === v.id
+                          ? 'border-primary bg-primary/5 shadow-lg shadow-primary/10'
+                          : 'border-slate-100 dark:border-slate-700 bg-white dark:bg-slate-800'
+                      }`}
+                    >
+                      <span className={`material-symbols-outlined text-2xl ${vehicleCategory === v.id ? 'text-primary' : 'text-slate-400'}`}>{v.icon}</span>
+                      <span className={`text-xs font-black ${vehicleCategory === v.id ? 'text-primary' : 'text-slate-700 dark:text-slate-200'}`}>{v.name}</span>
+                      <span className="text-[9px] text-slate-400 font-medium">{v.desc}</span>
+                    </button>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {!rcData && (
               <>
                 <div className="bg-slate-100 dark:bg-slate-800/60 rounded-2xl px-4 py-3 flex items-center gap-2">
                   <span className="material-symbols-outlined text-slate-500 text-xl">info</span>
@@ -1394,7 +1420,13 @@ const RegistrationFlow: React.FC<RegistrationFlowProps> = ({ onComplete }) => {
         {isStepDone() && (
           step < STEPS.length ? (
             <button
-              onClick={() => setStep(s => s + 1)}
+              onClick={async () => {
+                // Save vehicle category when leaving step 6
+                if (step === 6 && vehicleCategory && auth.currentUser) {
+                  await saveProgress(auth.currentUser.uid, { vehicleCategory });
+                }
+                setStep(s => s + 1);
+              }}
               className="w-full h-16 bg-primary text-white font-black rounded-2xl flex items-center justify-center gap-3 shadow-xl shadow-primary/30 active:scale-[0.98] transition-transform"
             >
               <span>Next</span>

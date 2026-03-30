@@ -6,7 +6,7 @@ const ParcelDimensions: React.FC = () => {
   const location = useLocation();
   const bookingState = location.state || {};
   const [weight, setWeight] = useState('');
-  const [weightUnit, setWeightUnit] = useState<'kg' | 'g'>('kg');
+  const [weightUnit, setWeightUnit] = useState<'kg' | 'g'>('g');
   const [dimensions, setDimensions] = useState({ length: '', width: '', height: '' });
   const [unit, setUnit] = useState<'cm' | 'inches'>('cm');
   const [volumetricWeight, setVolumetricWeight] = useState(0);

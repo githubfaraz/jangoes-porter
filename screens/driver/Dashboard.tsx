@@ -4,6 +4,7 @@ import { db, auth } from '../../src/firebase.ts';
 import { collection, query, where, onSnapshot, doc, updateDoc, getDoc } from 'firebase/firestore';
 import { BookingStatus, Trip } from '../../types.ts';
 import { extractKycData } from '../../services/kycHelper.ts';
+import LocationPermission from '../shared/LocationPermission.tsx';
 
 interface KycData {
   panStatus?: string;
@@ -23,7 +24,9 @@ function getPendingDocs(kycData: KycData): string[] {
 }
 
 const DriverDashboard: React.FC = () => {
-  const [isOnline, setIsOnline] = useState(false);
+  const [isOnline, setIsOnline] = useState(() => {
+    try { return sessionStorage.getItem('driverOnline') === 'true'; } catch { return false; }
+  });
   const [showRequest, setShowRequest] = useState(false);
   const [currentRequest, setCurrentRequest] = useState<(Trip & { id: string }) | null>(null);
   const navigate = useNavigate();
@@ -34,7 +37,16 @@ const DriverDashboard: React.FC = () => {
   const [kycData, setKycData] = useState<KycData>({});
   const [pendingDocs, setPendingDocs] = useState<string[]>([]);
   const [verifiedNotification, setVerifiedNotification] = useState(false);
+  const [driverVehicleCategory, setDriverVehicleCategory] = useState('');
+  const [isDriverDisabled, setIsDriverDisabled] = useState(false);
+  const [driverLat, setDriverLat] = useState<number | null>(null);
+  const [driverLng, setDriverLng] = useState<number | null>(null);
+  const [locationGranted, setLocationGranted] = useState(false);
+  const [showLocationPrompt, setShowLocationPrompt] = useState(false);
+  const geoWatchRef = useRef<number | null>(null);
   const prevPendingRef = useRef<string[]>([]);
+
+  const MAX_RADIUS_KM = 5;
 
   const offers = [
     { id: 1, title: 'Diwali Peak Bonus', desc: 'Get ₹50 extra on every order from 6PM to 10PM today!', color: 'from-orange-500 to-red-600', icon: 'celebration' },
@@ -53,6 +65,8 @@ const DriverDashboard: React.FC = () => {
 
       setDriverName(d.name || '');
       setDriverPhoto(d.photoURL || '');
+      setDriverVehicleCategory(d.vehicleCategory || '');
+      setIsDriverDisabled(d.disabled === true);
 
       const kd: KycData = extractKycData(d) as KycData;
       setKycData(kd);
@@ -71,6 +85,44 @@ const DriverDashboard: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
+  // ── Haversine distance in km ──
+  const haversineKm = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
+    const R = 6371;
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLng = (lng2 - lng1) * Math.PI / 180;
+    const a = Math.sin(dLat / 2) ** 2
+      + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
+    return R * 2 * Math.asin(Math.sqrt(a));
+  };
+
+  // ── Track driver GPS when online ──
+  useEffect(() => {
+    if (!isOnline) {
+      if (geoWatchRef.current !== null) {
+        navigator.geolocation.clearWatch(geoWatchRef.current);
+        geoWatchRef.current = null;
+      }
+      return;
+    }
+    if ('geolocation' in navigator) {
+      geoWatchRef.current = navigator.geolocation.watchPosition(
+        (pos) => {
+          setDriverLat(pos.coords.latitude);
+          setDriverLng(pos.coords.longitude);
+          setLocationGranted(true);
+        },
+        (err) => console.warn('Geolocation error:', err.message),
+        { enableHighAccuracy: true, maximumAge: 10000 }
+      );
+    }
+    return () => {
+      if (geoWatchRef.current !== null) {
+        navigator.geolocation.clearWatch(geoWatchRef.current);
+        geoWatchRef.current = null;
+      }
+    };
+  }, [isOnline]);
+
   // ── Trip listener — only active when online AND no pending docs ────────────
   useEffect(() => {
     console.log('[DASHBOARD] Trip listener check — isOnline:', isOnline, 'pendingDocs:', pendingDocs);
@@ -80,16 +132,33 @@ const DriverDashboard: React.FC = () => {
       return;
     }
 
-    console.log('[DASHBOARD] Trip listener ACTIVE — listening for SEARCHING trips');
+    console.log('[DASHBOARD] Trip listener ACTIVE — vehicle:', driverVehicleCategory, 'location:', driverLat, driverLng);
     const q = query(collection(db, 'trips'), where('status', '==', BookingStatus.SEARCHING));
     const unsubscribe = onSnapshot(q, (snapshot) => {
-      console.log('[DASHBOARD] Trip snapshot — empty:', snapshot.empty, 'count:', snapshot.size);
       if (!snapshot.empty) {
-        const d = snapshot.docs[0];
-        const tripData = d.data();
-        console.log('[DASHBOARD] Trip data:', JSON.stringify(tripData));
-        setCurrentRequest({ ...tripData as Trip, id: d.id });
-        setShowRequest(true);
+        // Find first trip matching vehicle category AND within radius
+        const match = snapshot.docs.find(d => {
+          const tripData = d.data();
+          const tripVehicleId = tripData.vehicleId || '';
+
+          // Vehicle category filter
+          if (driverVehicleCategory && tripVehicleId !== driverVehicleCategory) return false;
+
+          // Radius filter — only if driver location is available
+          if (driverLat !== null && driverLng !== null && tripData.pickup?.lat && tripData.pickup?.lng) {
+            const distKm = haversineKm(driverLat, driverLng, tripData.pickup.lat, tripData.pickup.lng);
+            if (distKm > MAX_RADIUS_KM) return false;
+          }
+
+          return true;
+        });
+        if (match) {
+          setCurrentRequest({ ...match.data() as Trip, id: match.id });
+          setShowRequest(true);
+        } else {
+          setShowRequest(false);
+          setCurrentRequest(null);
+        }
       } else {
         setShowRequest(false);
         setCurrentRequest(null);
@@ -97,11 +166,16 @@ const DriverDashboard: React.FC = () => {
     });
 
     return () => unsubscribe();
-  }, [isOnline, pendingDocs]);
+  }, [isOnline, pendingDocs, driverVehicleCategory, driverLat, driverLng]);
 
   const handleToggleOnline = (value: boolean) => {
-    if (value && pendingDocs.length > 0) return; // blocked
+    if (value && pendingDocs.length > 0) return; // blocked by pending docs
+    if (value && !locationGranted) {
+      setShowLocationPrompt(true);
+      return;
+    }
     setIsOnline(value);
+    try { sessionStorage.setItem('driverOnline', value ? 'true' : 'false'); } catch {}
   };
 
   const handleAcceptRequest = async () => {
@@ -114,13 +188,54 @@ const DriverDashboard: React.FC = () => {
       });
       setShowRequest(false);
       navigate('/active-trip', { state: { tripId: currentRequest.id } });
-    } catch (error) {
-      console.error("Accept Trip Error:", error);
-      alert("Failed to accept trip. It might have been taken by another driver.");
+    } catch (error: any) {
+      console.error("Accept Trip Error:", error?.code, error?.message, error);
+      alert("Failed to accept trip: " + (error?.message || 'Unknown error'));
     }
   };
 
   const firstName = driverName.split(' ')[0] || 'Driver';
+
+  // Location permission prompt for going online
+  if (showLocationPrompt) {
+    return (
+      <LocationPermission onGranted={(lat, lng) => {
+        setDriverLat(lat);
+        setDriverLng(lng);
+        setLocationGranted(true);
+        setShowLocationPrompt(false);
+        setIsOnline(true);
+        try { sessionStorage.setItem('driverOnline', 'true'); } catch {}
+      }}>
+        <div />
+      </LocationPermission>
+    );
+  }
+
+  // Account deactivated screen
+  if (isDriverDisabled) {
+    return (
+      <div className="min-h-screen w-full flex flex-col items-center justify-center p-8 text-center bg-white dark:bg-slate-950">
+        <div className="size-24 rounded-full bg-red-100 dark:bg-red-900/30 flex items-center justify-center mb-6">
+          <span className="material-symbols-outlined text-red-500 text-5xl">block</span>
+        </div>
+        <h2 className="text-2xl font-black text-slate-900 dark:text-white mb-3">Account Deactivated</h2>
+        <p className="text-slate-500 text-sm font-medium max-w-xs mb-2">
+          Your account has been temporarily deactivated by the admin team. You cannot go online or accept trips until your account is reactivated.
+        </p>
+        <p className="text-xs text-slate-400 max-w-xs mb-8">
+          If you believe this is an error, please contact support for assistance.
+        </p>
+        <button
+          onClick={() => navigate('/help')}
+          className="w-full max-w-xs h-14 bg-primary text-white font-black rounded-2xl flex items-center justify-center gap-2"
+        >
+          <span className="material-symbols-outlined">support_agent</span>
+          Contact Support
+        </button>
+      </div>
+    );
+  }
 
   return (
     <div className="relative min-h-screen w-full flex flex-col bg-slate-50 dark:bg-slate-950 overflow-y-auto no-scrollbar font-sans text-slate-900 dark:text-white pb-32">

@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
+import { uploadToCloudinary } from '../../services/cloudinaryUpload.ts';
 
 const CATEGORIES = ['Electronics', 'Clothing', 'Documents', 'Furniture', 'Food', 'Other'];
 
@@ -13,6 +14,22 @@ const ExchangeDetails: React.FC = () => {
   const [qcRequired, setQcRequired] = useState(false);
   const [qcInstructions, setQcInstructions] = useState('');
   const [weight, setWeight] = useState('');
+  const [productAPhotos, setProductAPhotos] = useState<string[]>([]);
+  const [productBPhotos, setProductBPhotos] = useState<string[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const photoInputARef = useRef<HTMLInputElement>(null);
+  const photoInputBRef = useRef<HTMLInputElement>(null);
+
+  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>, setPhotos: React.Dispatch<React.SetStateAction<string[]>>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    setUploading(true);
+    try {
+      const url = await uploadToCloudinary(file, 'exchange-reference');
+      setPhotos(prev => [...prev, url]);
+    } catch { alert('Photo upload failed.'); }
+    finally { setUploading(false); e.target.value = ''; }
+  };
 
   const isFormValid =
     productA.description.trim().length > 2 &&
@@ -26,7 +43,7 @@ const ExchangeDetails: React.FC = () => {
       state: {
         ...bookingState,
         serviceType: 'exchange',
-        exchange: { productA, productB, qcRequired, qcInstructions: qcRequired ? qcInstructions : '' },
+        exchange: { productA, productB, qcRequired, qcInstructions: qcRequired ? qcInstructions : '', productAPhotos, productBPhotos },
         dimensions: { chargeableWeight: parseFloat(weight), estimatedCost: 0 },
       },
     });
@@ -108,6 +125,20 @@ const ExchangeDetails: React.FC = () => {
                 ))}
               </div>
             </div>
+            {/* Reference photo upload */}
+            <div className="flex flex-col gap-2">
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Reference Photo (optional)</span>
+              <input ref={photoInputARef} type="file" accept="image/*" className="hidden" onChange={e => handlePhotoUpload(e, setProductAPhotos)} />
+              <div className="flex gap-2 flex-wrap">
+                {productAPhotos.map((url, i) => <img key={i} src={url} className="size-14 rounded-xl object-cover border" alt="" />)}
+                {productAPhotos.length < 3 && (
+                  <button onClick={() => photoInputARef.current?.click()} disabled={uploading}
+                    className="size-14 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-300 disabled:opacity-50">
+                    <span className="material-symbols-outlined text-xl">add_a_photo</span>
+                  </button>
+                )}
+              </div>
+            </div>
           </div>
         </div>
 
@@ -146,6 +177,20 @@ const ExchangeDetails: React.FC = () => {
                     {cat}
                   </button>
                 ))}
+              </div>
+            </div>
+            {/* Reference photo upload */}
+            <div className="flex flex-col gap-2">
+              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Reference Photo (optional)</span>
+              <input ref={photoInputBRef} type="file" accept="image/*" className="hidden" onChange={e => handlePhotoUpload(e, setProductBPhotos)} />
+              <div className="flex gap-2 flex-wrap">
+                {productBPhotos.map((url, i) => <img key={i} src={url} className="size-14 rounded-xl object-cover border" alt="" />)}
+                {productBPhotos.length < 3 && (
+                  <button onClick={() => photoInputBRef.current?.click()} disabled={uploading}
+                    className="size-14 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-300 disabled:opacity-50">
+                    <span className="material-symbols-outlined text-xl">add_a_photo</span>
+                  </button>
+                )}
               </div>
             </div>
           </div>

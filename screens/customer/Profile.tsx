@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { auth, db } from '../../src/firebase.ts';
 import { doc, getDoc, setDoc } from 'firebase/firestore';
 
-const CustomerProfile: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
+const CustomerProfile: React.FC<{ onLogout: () => void; canSwitchRole?: boolean; onSwitchRole?: () => void }> = ({ onLogout, canSwitchRole, onSwitchRole }) => {
   const navigate = useNavigate();
   const [isEditing, setIsEditing] = useState(false);
   const [userData, setUserData] = useState({ name: '', email: '', phone: '', photoURL: '', defaultBuilding: '' });
@@ -176,7 +176,17 @@ const CustomerProfile: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
                 </div>
               </section>
 
-              <button 
+              {canSwitchRole && onSwitchRole && (
+                <button
+                  onClick={onSwitchRole}
+                  className="w-full bg-primary/5 text-primary font-black py-5 rounded-3xl border border-primary/20 flex items-center justify-center gap-3 active:scale-95 transition-all shadow-sm mb-3"
+                >
+                  <span className="material-symbols-outlined filled">local_shipping</span>
+                  <span className="text-sm uppercase tracking-widest">Switch to Driver Mode</span>
+                </button>
+              )}
+
+              <button
                 onClick={onLogout}
                 className="w-full bg-red-50 dark:bg-red-950/20 text-red-600 font-black py-5 rounded-3xl border border-red-100 dark:border-red-900/20 flex items-center justify-center gap-3 active:scale-95 transition-all shadow-sm"
               >

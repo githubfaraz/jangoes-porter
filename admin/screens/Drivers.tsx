@@ -1,7 +1,10 @@
-import React, { useEffect, useState, useMemo } from 'react';
+import React, { useEffect, useState, useMemo, useRef } from 'react';
 import { collection, getDocs, getDoc, query, where, doc, updateDoc, setDoc } from 'firebase/firestore';
 import { db } from '../../src/firebase';
 import { extractKycData } from '../../services/kycHelper';
+import { uploadToCloudinary } from '../../services/cloudinaryUpload';
+import { useAdminAuth } from '../hooks/useAdminAuth';
+import { logAdminAction } from '../services/activityLog';
 
 interface Driver {
   id: string;
@@ -16,24 +19,27 @@ interface Driver {
   createdAt: string;
   pendingDocNames?: string[];
   kycData?: Record<string, any>;
+  disabled?: boolean;
+  vehicleCategory?: string;
 }
 
 interface DocItem {
-  key: string;           // Firestore field prefix (e.g. 'pan')
-  statusField: string;   // e.g. 'panStatus'
+  key: string;
+  statusField: string;
   label: string;
-  nameField?: string;    // e.g. 'panName'
-  numberField?: string;  // e.g. 'panNumber'
-  imageField?: string;   // e.g. 'panImageUrl'
-  rejectField: string;   // e.g. 'panRejectReason'
+  nameField?: string;
+  numberField?: string;
+  imageField?: string;
+  rejectField: string;
+  adminUploadField?: string;  // e.g. 'dlAdminUploadUrl'
 }
 
 const DOC_ITEMS: DocItem[] = [
   { key: 'aadhaar', statusField: 'aadhaarVerified', label: 'Aadhaar Card', nameField: 'aadhaarName', numberField: 'aadhaarNumber', imageField: 'aadhaarFrontUrl', rejectField: 'aadhaarRejectReason' },
   { key: 'aadhaarBack', statusField: 'aadhaarVerified', label: 'Aadhaar Back', imageField: 'aadhaarBackUrl', rejectField: 'aadhaarBackRejectReason' },
-  { key: 'pan', statusField: 'panStatus', label: 'PAN Card', nameField: 'panName', numberField: 'panNumber', imageField: 'panImageUrl', rejectField: 'panRejectReason' },
-  { key: 'dl', statusField: 'dlStatus', label: 'Driving License', nameField: 'dlName', numberField: 'dlNumber', rejectField: 'dlRejectReason' },
-  { key: 'rc', statusField: 'rcVerifyStatus', label: 'RC / Vehicle Registration', nameField: 'rcOwnerName', numberField: 'rcNumber', rejectField: 'rcRejectReason' },
+  { key: 'pan', statusField: 'panStatus', label: 'PAN Card', nameField: 'panName', numberField: 'panNumber', imageField: 'panImageUrl', rejectField: 'panRejectReason', adminUploadField: 'panAdminUploadUrl' },
+  { key: 'dl', statusField: 'dlStatus', label: 'Driving License', nameField: 'dlName', numberField: 'dlNumber', rejectField: 'dlRejectReason', adminUploadField: 'dlAdminUploadUrl' },
+  { key: 'rc', statusField: 'rcVerifyStatus', label: 'RC / Vehicle Registration', nameField: 'rcOwnerName', numberField: 'rcNumber', rejectField: 'rcRejectReason', adminUploadField: 'rcAdminUploadUrl' },
   { key: 'selfie', statusField: '', label: 'Driver Selfie', imageField: 'selfieUrl', rejectField: 'selfieRejectReason' },
 ];
 
@@ -57,6 +63,7 @@ function getDocStatus(kd: Record<string, any>, item: DocItem): string {
 }
 
 export default function Drivers() {
+  const { can } = useAdminAuth();
   const [drivers, setDrivers] = useState<Driver[]>([]);
   const [tripCounts, setTripCounts] = useState<Record<string, number>>({});
   const [loading, setLoading] = useState(true);
@@ -68,6 +75,9 @@ export default function Drivers() {
   const [rejectingDoc, setRejectingDoc] = useState<string | null>(null);
   const [rejectReason, setRejectReason] = useState('');
   const [previewImage, setPreviewImage] = useState('');
+  const [uploadingDocKey, setUploadingDocKey] = useState('');
+  const adminUploadRef = useRef<HTMLInputElement>(null);
+  const [uploadTargetItem, setUploadTargetItem] = useState<DocItem | null>(null);
 
   const loadDrivers = async () => {
     try {
@@ -130,6 +140,7 @@ export default function Drivers() {
       if (item.statusField) fields[item.statusField] = 'verified';
       fields[item.rejectField] = '';
       await adminUpdateKycField(driver.id, fields);
+      await logAdminAction({ action: 'driver.doc.approved', target: driver.id, details: `Approved ${item.label} for ${driver.name || driver.id}` });
 
       // Check if all docs are now verified → approve driver fully
       const updatedKd = { ...driver.kycData, [item.statusField]: 'verified', [item.rejectField]: '' };
@@ -157,6 +168,7 @@ export default function Drivers() {
       if (item.statusField) fields[item.statusField] = 'rejected';
       fields[item.rejectField] = rejectReason.trim();
       await adminUpdateKycField(driver.id, fields);
+      await logAdminAction({ action: 'driver.doc.rejected', target: driver.id, details: `Rejected ${item.label} for ${driver.name || driver.id}: ${rejectReason.trim()}` });
       setRejectingDoc(null);
       setRejectReason('');
       await loadDrivers();
@@ -180,12 +192,67 @@ export default function Drivers() {
       await adminUpdateKycField(driver.id, kycFields);
       await setDoc(doc(db, 'users', driver.id), { kycAllVerified: true, pendingDocNames: [] }, { merge: true });
 
+      await logAdminAction({ action: 'driver.docs.approved_all', target: driver.id, details: `Approved all documents for ${driver.name || driver.id}` });
       alert('All documents approved!');
       setSelectedDriver(null);
       await loadDrivers();
     } catch (err: any) { console.error('[ADMIN] Approve all error:', err?.message, err?.code, err); alert('Failed to approve all: ' + (err?.message || 'Unknown error')); }
     finally { setActionLoading(''); }
   };
+
+  // Admin uploads a verified document for a driver
+  const handleAdminUpload = async (driver: Driver, item: DocItem, file: File) => {
+    if (!item.adminUploadField) return;
+    setUploadingDocKey(item.key);
+    try {
+      const url = await uploadToCloudinary(file, `admin-uploads/${driver.id}/${item.key}`);
+      const fields: Record<string, any> = {
+        [item.adminUploadField]: url,
+        [`${item.key}AdminUploadedBy`]: adminAuth.uid,
+        [`${item.key}AdminUploadedByName`]: adminAuth.name,
+        [`${item.key}AdminUploadedAt`]: new Date().toISOString(),
+      };
+      await adminUpdateKycField(driver.id, fields);
+      await logAdminAction({
+        action: 'driver.doc.uploaded',
+        target: driver.id,
+        details: `Uploaded verified ${item.label} document for ${driver.name || driver.id}`,
+        metadata: { docType: item.key, uploadUrl: url },
+      });
+      // Refresh
+      const refreshed = await getDoc(doc(db, 'users', driver.id));
+      if (refreshed.exists()) { const raw = refreshed.data(); setSelectedDriver({ ...raw as Driver, id: refreshed.id, kycData: extractKycData(raw) }); }
+      await loadDrivers();
+    } catch (err: any) {
+      console.error('Admin upload error:', err);
+      alert('Upload failed: ' + (err?.message || 'Unknown error'));
+    } finally {
+      setUploadingDocKey('');
+      setUploadTargetItem(null);
+    }
+  };
+
+  // Toggle driver active/deactive
+  const handleToggleDriverStatus = async (driver: Driver) => {
+    const newDisabled = !driver.disabled;
+    try {
+      await setDoc(doc(db, 'users', driver.id), { disabled: newDisabled }, { merge: true });
+      await logAdminAction({
+        action: newDisabled ? 'driver.deactivated' : 'driver.activated',
+        target: driver.id,
+        details: `${newDisabled ? 'Deactivated' : 'Activated'} driver ${driver.name || driver.id}`,
+      });
+      await loadDrivers();
+      if (selectedDriver?.id === driver.id) {
+        const refreshed = await getDoc(doc(db, 'users', driver.id));
+        if (refreshed.exists()) { const raw = refreshed.data(); setSelectedDriver({ ...raw as Driver, id: refreshed.id, kycData: extractKycData(raw) }); }
+      }
+    } catch (err: any) {
+      alert('Failed to update driver status: ' + (err?.message || 'Unknown error'));
+    }
+  };
+
+  const adminAuth = useAdminAuth();
 
   const filtered = useMemo(() => {
     let list = drivers;
@@ -342,8 +409,83 @@ export default function Drivers() {
               </button>
             </div>
 
+            {/* Hidden file input for admin uploads */}
+            <input ref={adminUploadRef} type="file" accept="image/*,.pdf" className="hidden"
+              onChange={e => {
+                const file = e.target.files?.[0];
+                if (file && selectedDriver && uploadTargetItem) handleAdminUpload(selectedDriver, uploadTargetItem, file);
+                e.target.value = '';
+              }} />
+
             <div className="px-6 py-5 space-y-6">
-              {/* Documents */}
+              {/* Section A: Personal Information */}
+              <div>
+                <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">Personal Information</h4>
+                <div className="bg-gray-50 rounded-2xl p-4 space-y-3">
+                  <div className="flex items-center gap-4">
+                    {(selectedDriver.photoURL || selectedDriver.kycData?.selfieUrl) ? (
+                      <img src={selectedDriver.photoURL || selectedDriver.kycData?.selfieUrl} alt="" className="w-16 h-16 rounded-full object-cover border-2 border-gray-200 cursor-pointer" onClick={() => setPreviewImage(selectedDriver.photoURL || selectedDriver.kycData?.selfieUrl || '')} />
+                    ) : (
+                      <div className="w-16 h-16 rounded-full bg-purple-100 flex items-center justify-center"><span className="text-purple-600 font-bold text-xl">{selectedDriver.name?.charAt(0) || '?'}</span></div>
+                    )}
+                    <div className="flex-1">
+                      <p className="font-bold text-gray-800 text-lg">{selectedDriver.name || '—'}</p>
+                      <p className="text-xs text-gray-400">{selectedDriver.id}</p>
+                    </div>
+                    {/* Active/Deactive Toggle */}
+                    <div className="flex flex-col items-center gap-1">
+                      <button
+                        onClick={() => handleToggleDriverStatus(selectedDriver)}
+                        className={`px-3 py-1.5 rounded-lg text-xs font-bold transition-colors ${selectedDriver.disabled ? 'bg-red-100 text-red-700 hover:bg-red-200' : 'bg-green-100 text-green-700 hover:bg-green-200'}`}
+                      >
+                        {selectedDriver.disabled ? 'Deactivated' : 'Active'}
+                      </button>
+                      <span className="text-[9px] text-gray-400">Click to toggle</span>
+                    </div>
+                  </div>
+                  <div className="grid grid-cols-2 gap-3 text-sm">
+                    <div><span className="text-gray-400 text-xs">Phone</span><p className="font-semibold text-gray-800">{selectedDriver.phoneNumber || '—'}</p></div>
+                    <div><span className="text-gray-400 text-xs">Email</span><p className="font-semibold text-gray-800">{selectedDriver.email || '—'}</p></div>
+                    <div><span className="text-gray-400 text-xs">Aadhaar Name</span><p className="font-semibold text-gray-800">{selectedDriver.kycData?.aadhaarName || '—'}</p></div>
+                    <div><span className="text-gray-400 text-xs">Aadhaar Number</span><p className="font-semibold text-gray-800">{selectedDriver.kycData?.aadhaarNumber || '—'}</p></div>
+                    <div><span className="text-gray-400 text-xs">DOB</span><p className="font-semibold text-gray-800">{selectedDriver.kycData?.aadhaarDob || '—'}</p></div>
+                    <div><span className="text-gray-400 text-xs">Gender</span><p className="font-semibold text-gray-800">{selectedDriver.kycData?.aadhaarGender || '—'}</p></div>
+                    <div className="col-span-2"><span className="text-gray-400 text-xs">Address</span><p className="font-semibold text-gray-800 text-xs leading-relaxed">{selectedDriver.kycData?.aadhaarAddress || '—'}</p></div>
+                    <div><span className="text-gray-400 text-xs">Vehicle Category</span><p className="font-semibold text-gray-800">{selectedDriver.vehicleCategory || '—'}</p></div>
+                    <div><span className="text-gray-400 text-xs">Registered</span><p className="font-semibold text-gray-800">{formatDate(selectedDriver.createdAt)}</p></div>
+                  </div>
+                  {/* Contact Buttons */}
+                  {selectedDriver.phoneNumber && (
+                    <div className="flex gap-2 pt-2">
+                      <a href={`tel:${selectedDriver.phoneNumber}`} className="flex-1 flex items-center justify-center gap-2 h-10 bg-green-600 text-white rounded-xl text-xs font-bold hover:bg-green-700 transition-colors">
+                        <span className="material-symbols-outlined text-sm">call</span>Call
+                      </a>
+                      <a href={`https://wa.me/91${selectedDriver.phoneNumber}`} target="_blank" rel="noopener noreferrer" className="flex-1 flex items-center justify-center gap-2 h-10 bg-green-500 text-white rounded-xl text-xs font-bold hover:bg-green-600 transition-colors">
+                        <span className="material-symbols-outlined text-sm">chat</span>WhatsApp
+                      </a>
+                    </div>
+                  )}
+                </div>
+              </div>
+
+              {/* Section B: Vehicle Information */}
+              {selectedDriver.kycData?.rcMakerModel && (
+                <div>
+                  <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-3">Vehicle Information</h4>
+                  <div className="bg-gray-50 rounded-2xl p-4">
+                    <div className="grid grid-cols-2 gap-3 text-sm">
+                      <div><span className="text-gray-400 text-xs">Make / Model</span><p className="font-semibold text-gray-800">{selectedDriver.kycData.rcMakerModel}</p></div>
+                      <div><span className="text-gray-400 text-xs">Fuel Type</span><p className="font-semibold text-gray-800">{selectedDriver.kycData.rcFuelType || '—'}</p></div>
+                      <div><span className="text-gray-400 text-xs">RC Number</span><p className="font-semibold text-gray-800 font-mono">{selectedDriver.kycData.rcNumber || '—'}</p></div>
+                      <div><span className="text-gray-400 text-xs">RC Status</span><p className="font-semibold text-gray-800">{selectedDriver.kycData.rcStatus || '—'}</p></div>
+                      <div><span className="text-gray-400 text-xs">Fitness Valid Till</span><p className="font-semibold text-gray-800">{selectedDriver.kycData.rcFitnessExpiry || '—'}</p></div>
+                      <div><span className="text-gray-400 text-xs">Insurance Valid Till</span><p className="font-semibold text-gray-800">{selectedDriver.kycData.rcInsuranceValidity || '—'}</p></div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Section C: KYC Documents */}
               <div>
                 <h4 className="text-xs font-bold text-gray-400 uppercase tracking-wide mb-4">KYC Documents</h4>
                 <div className="space-y-4">
@@ -388,26 +530,49 @@ export default function Drivers() {
                                 <p className="text-xs text-red-600"><span className="font-bold">Rejection reason:</span> {rejectComment}</p>
                               </div>
                             )}
+                            {/* Admin uploaded document */}
+                            {item.adminUploadField && kd[item.adminUploadField] && (
+                              <div className="mt-2 bg-blue-50 rounded-lg px-3 py-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="material-symbols-outlined text-blue-500 text-sm">upload_file</span>
+                                  <span className="text-xs text-blue-700 font-bold">Verified document uploaded</span>
+                                </div>
+                                <p className="text-[10px] text-blue-500 mt-0.5">
+                                  By {kd[`${item.key}AdminUploadedByName`] || 'Admin'} on {kd[`${item.key}AdminUploadedAt`] ? new Date(kd[`${item.key}AdminUploadedAt`]).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) : '—'}
+                                </p>
+                                <img src={kd[item.adminUploadField]} alt="Admin uploaded" className="mt-2 w-full max-h-32 object-contain rounded-lg border cursor-pointer" onClick={() => setPreviewImage(kd[item.adminUploadField])} />
+                              </div>
+                            )}
                           </div>
 
                           {/* Action Buttons */}
-                          {(status === 'pending_review' || status === 'rejected') && item.statusField && (
-                            <div className="flex flex-col gap-2 shrink-0">
-                              <button
-                                onClick={() => handleApproveDoc(selectedDriver, item)}
-                                disabled={!!actionLoading}
-                                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
-                              >
-                                {actionLoading === item.key ? '...' : 'Approve'}
-                              </button>
-                              <button
-                                onClick={() => { setRejectingDoc(isRejecting ? null : item.key); setRejectReason(''); }}
-                                className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-100 text-red-700 hover:bg-red-200 transition-colors"
-                              >
-                                Reject
-                              </button>
-                            </div>
+                          <div className="flex flex-col gap-2 shrink-0">
+                          {(status === 'pending_review' || status === 'rejected') && item.statusField && can('drivers.review') && (<>
+                            <button
+                              onClick={() => handleApproveDoc(selectedDriver, item)}
+                              disabled={!!actionLoading}
+                              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-green-600 text-white hover:bg-green-700 disabled:opacity-50 transition-colors"
+                            >
+                              {actionLoading === item.key ? '...' : 'Approve'}
+                            </button>
+                            <button
+                              onClick={() => { setRejectingDoc(isRejecting ? null : item.key); setRejectReason(''); }}
+                              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-red-100 text-red-700 hover:bg-red-200 transition-colors"
+                            >
+                              Reject
+                            </button>
+                          </>)}
+                          {/* Upload Verified Document */}
+                          {item.adminUploadField && can('drivers.review') && (
+                            <button
+                              onClick={() => { setUploadTargetItem(item); adminUploadRef.current?.click(); }}
+                              disabled={!!uploadingDocKey}
+                              className="px-3 py-1.5 rounded-lg text-xs font-bold bg-blue-100 text-blue-700 hover:bg-blue-200 disabled:opacity-50 transition-colors"
+                            >
+                              {uploadingDocKey === item.key ? 'Uploading...' : 'Upload Doc'}
+                            </button>
                           )}
+                          </div>
                         </div>
 
                         {/* Reject Reason Input */}

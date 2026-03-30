@@ -3,27 +3,36 @@ import { useNavigate } from 'react-router-dom';
 import { SERVICES } from '../../constants.tsx';
 import { auth, db } from '../../src/firebase.ts';
 import { doc, getDoc } from 'firebase/firestore';
+import LocationPermission from '../shared/LocationPermission.tsx';
+import { loadAppSettings, isServiceEnabled } from '../../services/appSettings.ts';
 
 const CustomerHome: React.FC = () => {
   const navigate = useNavigate();
   const [userName, setUserName] = useState('');
   const [userPhoto, setUserPhoto] = useState('');
+  const [walletBalance, setWalletBalance] = useState<number | null>(null);
+  const [enabledServices, setEnabledServices] = useState<Record<string, boolean>>({});
 
   useEffect(() => {
     const user = auth.currentUser;
     if (!user) return;
-    // Prefer Firebase Auth photo (set by Google sign-in)
     if (user.photoURL) setUserPhoto(user.photoURL);
     getDoc(doc(db, 'users', user.uid)).then((snap) => {
       if (snap.exists()) {
         const data = snap.data();
         if (data.name) setUserName(data.name);
         if (data.photoURL) setUserPhoto(data.photoURL);
+        setWalletBalance(data.walletBalance ?? 0);
       }
     });
+    // Load service config
+    loadAppSettings().then(s => setEnabledServices(s.services || {}));
   }, []);
 
+  const activeServices = SERVICES.filter(s => enabledServices[s.id] !== false);
+
   return (
+    <LocationPermission onGranted={() => {}}>
     <div className="relative min-h-screen w-full flex flex-col bg-slate-50 dark:bg-slate-950 overflow-y-auto no-scrollbar font-sans text-slate-900 dark:text-white pb-32">
       {/* Premium Mesh Background */}
       <div className="fixed inset-0 overflow-hidden pointer-events-none z-0">
@@ -67,7 +76,7 @@ const CustomerHome: React.FC = () => {
           <div className="relative z-10 flex justify-between items-center">
             <div className="flex flex-col gap-1">
               <span className="text-[10px] font-black text-white/60 uppercase tracking-widest">Available Balance</span>
-              <span className="text-3xl font-black text-white tracking-tight">₹2,450.00</span>
+              <span className="text-3xl font-black text-white tracking-tight">₹{walletBalance !== null ? walletBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 }) : '...'}</span>
             </div>
             <div className="size-12 rounded-2xl bg-white/10 backdrop-blur-md flex items-center justify-center text-white border border-white/20">
               <span className="material-symbols-outlined text-2xl">account_balance_wallet</span>
@@ -95,10 +104,10 @@ const CustomerHome: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-2 gap-4">
-            {SERVICES.slice(0, 4).map((service) => (
-              <button 
-                key={service.id} 
-                onClick={() => navigate('/search')}
+            {activeServices.slice(0, 4).map((service) => (
+              <button
+                key={service.id}
+                onClick={() => navigate('/search', { state: { serviceType: service.id } })}
                 className="group flex flex-col bg-white dark:bg-slate-900 border border-slate-50 dark:border-slate-800 p-5 rounded-[28px] shadow-[0_10px_30px_rgba(0,0,0,0.02)] hover:shadow-xl hover:border-primary/20 transition-all text-left active:scale-95"
               >
                 <div className={`size-14 rounded-2xl bg-gradient-to-br ${service.color} flex items-center justify-center text-white shadow-lg mb-4 group-hover:scale-110 transition-transform`}>
@@ -160,6 +169,7 @@ const CustomerHome: React.FC = () => {
         </div>
       </div>
     </div>
+    </LocationPermission>
   );
 };
 

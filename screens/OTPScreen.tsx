@@ -119,14 +119,24 @@ const OTPScreen: React.FC<OTPScreenProps> = ({ onVerify }) => {
       const userDoc = await getDoc(userDocRef);
 
       if (!userDoc.exists()) {
-        // Create new user profile
+        // New user — create with selected role
         await setDoc(userDocRef, {
           phoneNumber,
           role,
+          roles: [role],
           kycCompleted: false,
           createdAt: new Date().toISOString(),
           walletBalance: 0
         });
+      } else {
+        // Existing user — add role if not present
+        const data = userDoc.data();
+        const existingRoles: string[] = data.roles || [data.role];
+        if (!existingRoles.includes(role)) {
+          await setDoc(userDocRef, { roles: [...existingRoles, role] }, { merge: true });
+        }
+        // Update the active role to what user selected on login
+        await setDoc(userDocRef, { role }, { merge: true });
       }
 
       onVerify(role);

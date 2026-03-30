@@ -1,7 +1,7 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { db } from '../../src/firebase.ts';
-import { doc, onSnapshot, updateDoc, getDoc } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { BookingStatus, Trip } from '../../types.ts';
 import { Map, AdvancedMarker } from '@vis.gl/react-google-maps';
 
@@ -24,7 +24,12 @@ const Tracking: React.FC = () => {
   const [driverName, setDriverName] = useState('');
   const [driverPhoto, setDriverPhoto] = useState('');
   const [driverVehicle, setDriverVehicle] = useState('');
+  const [driverRcNumber, setDriverRcNumber] = useState('');
+  const [driverRating, setDriverRating] = useState<number>(0);
+  const [driverPhone, setDriverPhone] = useState('');
   const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
+  const [notification, setNotification] = useState<{ title: string; message: string } | null>(null);
+  const prevStatusRef = useRef<string>('');
 
   useEffect(() => {
     if (!tripId) return;
@@ -36,6 +41,32 @@ const Tracking: React.FC = () => {
         if (data.status === BookingStatus.COMPLETED) {
           setTripCompleted(true);
         }
+        // Show notification on status change
+        const prev = prevStatusRef.current;
+        if (prev && data.status !== prev) {
+          const notifs: Record<string, { title: string; message: string }> = {
+            [BookingStatus.ACCEPTED]: { title: 'Driver Assigned', message: 'A driver has accepted your booking and is on the way to pickup.' },
+            [BookingStatus.ARRIVED_AT_PICKUP]: { title: 'Driver Arrived', message: 'Driver has reached the pickup location.' },
+            [BookingStatus.IN_TRANSIT]: { title: 'Parcel Picked Up', message: 'Your parcel is on the way to the destination.' },
+            [BookingStatus.ARRIVED_AT_DESTINATION]: { title: 'At Destination', message: 'Driver has reached the drop-off location.' },
+            [BookingStatus.DROPPING_OFF]: { title: 'Delivering', message: 'Driver is delivering your parcel to the receiver.' },
+            // Exchange-specific
+            [BookingStatus.ARRIVED_AT_RECEIVER]: { title: 'At Receiver', message: 'Driver has reached the receiver to collect Product B.' },
+            [BookingStatus.PICKING_UP_PRODUCT_B]: { title: 'Collecting Product B', message: 'Driver is collecting Product B from the receiver.' },
+            [BookingStatus.QC_PENDING]: { title: 'QC Submitted', message: 'Driver submitted quality check. Please review and approve.' },
+            [BookingStatus.QC_APPROVED]: { title: 'QC Approved', message: 'You approved Product B. Driver is returning it to you.' },
+            [BookingStatus.QC_REJECTED]: { title: 'QC Rejected', message: 'You rejected Product B. Driver will return your original item.' },
+            [BookingStatus.RETURNING_PRODUCT_B]: { title: 'Returning Product B', message: 'Driver is on the way back with Product B.' },
+            [BookingStatus.RETURNING_PRODUCT_A]: { title: 'Exchange Failed', message: 'Driver is returning your original item (Product A).' },
+            [BookingStatus.ARRIVED_AT_ORIGIN_RETURN]: { title: 'Driver Arrived', message: 'Driver has arrived to hand over the item.' },
+          };
+          const n = notifs[data.status];
+          if (n) {
+            setNotification(n);
+            setTimeout(() => setNotification(null), 5000);
+          }
+        }
+        prevStatusRef.current = data.status;
         // Track driver live location
         if (data.driverLocation?.lat && data.driverLocation?.lng) {
           setDriverLocation({ lat: data.driverLocation.lat, lng: data.driverLocation.lng });
@@ -43,14 +74,15 @@ const Tracking: React.FC = () => {
         // Fetch real driver info when trip is accepted and we have a driverId
         if (data.driverId && !driverName) {
           try {
-            const driverDoc = await getDoc(doc(db, 'users', data.driverId));
-            if (driverDoc.exists()) {
-              const dd = driverDoc.data();
-              setDriverName(dd.name || 'Driver');
-              setDriverPhoto(dd.photoURL || '');
-              // Use vehicle type from trip, and RC number from kycData if available
-              const rcNumber = dd.kycData?.rcNumber || '';
-              setDriverVehicle(`${data.vehicleType}${rcNumber ? ' • ' + rcNumber : ''}`);
+            const res = await fetch(`/api/driver-info/${data.driverId}`);
+            const info = await res.json();
+            if (info.found) {
+              setDriverName(info.name);
+              setDriverPhoto(info.photoURL || '');
+              setDriverVehicle(info.vehicleModel || data.vehicleType || 'Vehicle');
+              setDriverRcNumber(info.rcNumber || '');
+              setDriverPhone(info.phoneNumber || '');
+              if (info.rating > 0) setDriverRating(info.rating);
             }
           } catch (err) {
             console.error('Error fetching driver info:', err);
@@ -280,6 +312,23 @@ const Tracking: React.FC = () => {
 
   return (
     <div className="relative h-screen w-full flex flex-col bg-background-light dark:bg-background-dark overflow-hidden text-slate-900">
+      {/* Status Notification Banner */}
+      {notification && (
+        <div className="fixed top-14 left-1/2 -translate-x-1/2 z-[200] w-full max-w-md px-4 animate-in slide-in-from-top duration-500">
+          <div className="bg-slate-900 text-white p-4 rounded-2xl shadow-2xl border border-white/10 flex items-center gap-4">
+            <div className="size-10 rounded-xl bg-primary flex items-center justify-center shrink-0">
+              <span className="material-symbols-outlined">notifications_active</span>
+            </div>
+            <div className="flex flex-col flex-1">
+              <span className="text-xs font-black uppercase tracking-widest text-primary">{notification.title}</span>
+              <p className="text-sm font-medium opacity-90">{notification.message}</p>
+            </div>
+            <button onClick={() => setNotification(null)} className="text-white/50 shrink-0">
+              <span className="material-symbols-outlined text-lg">close</span>
+            </button>
+          </div>
+        </div>
+      )}
       {/* Live Map Area */}
       <div className="h-[40%] w-full relative shrink-0">
         <Map
@@ -328,9 +377,17 @@ const Tracking: React.FC = () => {
             {trip?.status === BookingStatus.ACCEPTED && 'Driver is on the way to pickup'}
             {trip?.status === BookingStatus.ARRIVED_AT_PICKUP && 'Driver arrived at pickup'}
             {trip?.status === BookingStatus.PICKING_UP && 'Picking up your parcel'}
-            {trip?.status === BookingStatus.IN_TRANSIT && 'Parcel is on the way'}
+            {trip?.status === BookingStatus.IN_TRANSIT && (trip?.serviceType === 'exchange' ? 'Heading to receiver location' : 'Parcel is on the way')}
             {trip?.status === BookingStatus.ARRIVED_AT_DESTINATION && 'Driver arrived at destination'}
             {trip?.status === BookingStatus.DROPPING_OFF && 'Delivering your parcel'}
+            {trip?.status === BookingStatus.ARRIVED_AT_RECEIVER && 'Driver at receiver location'}
+            {trip?.status === BookingStatus.PICKING_UP_PRODUCT_B && 'Collecting Product B'}
+            {trip?.status === BookingStatus.QC_PENDING && 'Review Quality Check'}
+            {trip?.status === BookingStatus.QC_APPROVED && 'QC Approved — returning'}
+            {trip?.status === BookingStatus.QC_REJECTED && 'QC Rejected — returning original'}
+            {trip?.status === BookingStatus.RETURNING_PRODUCT_B && 'Returning Product B to you'}
+            {trip?.status === BookingStatus.RETURNING_PRODUCT_A && 'Returning Product A to you'}
+            {trip?.status === BookingStatus.ARRIVED_AT_ORIGIN_RETURN && 'Driver arrived for handover'}
           </div>
           <div className="w-10"></div>
         </div>
@@ -343,41 +400,89 @@ const Tracking: React.FC = () => {
         
         {trip?.status !== BookingStatus.SEARCHING ? (
           <>
-            <div className="flex items-center gap-4 py-2">
-              {driverPhoto ? (
-                <div
-                  className="size-14 rounded-full bg-cover bg-center border"
-                  style={{ backgroundImage: `url('${driverPhoto}')` }}
-                />
-              ) : (
-                <div className="size-14 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center border">
-                  <span className="material-symbols-outlined text-slate-400 text-2xl">person</span>
+            <div className="bg-slate-50 dark:bg-slate-800 rounded-2xl p-4">
+              <div className="flex items-center gap-4">
+                {driverPhoto ? (
+                  <div
+                    className="size-14 rounded-full bg-cover bg-center border-2 border-white shadow-md shrink-0"
+                    style={{ backgroundImage: `url('${driverPhoto}')` }}
+                  />
+                ) : (
+                  <div className="size-14 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center border-2 border-white shadow-md shrink-0">
+                    <span className="material-symbols-outlined text-slate-400 text-2xl">person</span>
+                  </div>
+                )}
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-bold text-lg dark:text-white truncate">{driverName || 'Driver'}</h3>
+                    {driverRating > 0 && (
+                      <span className="flex items-center gap-0.5 bg-green-100 text-green-700 text-xs font-black px-2 py-0.5 rounded-full shrink-0">
+                        <span className="material-symbols-outlined text-xs filled">star</span>
+                        {driverRating}
+                      </span>
+                    )}
+                  </div>
+                  <p className="text-sm text-slate-700 dark:text-slate-300 font-semibold truncate">{driverVehicle}</p>
+                  {driverRcNumber && (
+                    <p className="text-xs text-slate-400 font-mono tracking-wider mt-0.5">{driverRcNumber}</p>
+                  )}
                 </div>
-              )}
-              <div className="flex-1">
-                <h3 className="font-bold text-lg dark:text-white">{driverName || 'Driver'}</h3>
-                <p className="text-xs text-slate-500">{driverVehicle || trip?.vehicleType || 'Vehicle'}</p>
               </div>
-              <div className="flex gap-2">
-                <button 
+              <div className="flex gap-2 mt-3">
+                <button
                   onClick={() => navigate('/chat', { state: { tripId } })}
-                  className="w-10 h-10 bg-slate-50 dark:bg-slate-800 rounded-lg flex items-center justify-center text-slate-600 dark:text-slate-400"
+                  className="flex-1 h-10 bg-white dark:bg-slate-700 rounded-xl flex items-center justify-center gap-2 text-slate-600 dark:text-slate-300 text-xs font-bold border border-slate-200 dark:border-slate-600"
                 >
-                  <span className="material-symbols-outlined">chat</span>
+                  <span className="material-symbols-outlined text-lg">chat</span>Chat
                 </button>
-                <button className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center text-primary">
-                  <span className="material-symbols-outlined filled">call</span>
-                </button>
+                <a href={driverPhone ? `tel:+91${driverPhone}` : '#'} className="flex-1 h-10 bg-primary/10 rounded-xl flex items-center justify-center gap-2 text-primary text-xs font-bold">
+                  <span className="material-symbols-outlined text-lg filled">call</span>Call
+                </a>
               </div>
             </div>
 
-            <div className="mt-6 bg-blue-50 dark:bg-primary/10 rounded-xl p-4 flex items-center justify-between">
-              <div className="flex flex-col">
-                <span className="text-[10px] uppercase font-bold text-primary tracking-widest mb-1">Pickup OTP</span>
-                <span className="text-2xl font-bold tracking-[0.2em] font-mono dark:text-white">{trip?.pickupPin || '----'}</span>
-              </div>
-              <span className="material-symbols-outlined text-primary text-3xl">shield</span>
-            </div>
+            {/* Show appropriate OTP based on trip stage */}
+            {(() => {
+              const isExchange = trip?.serviceType === 'exchange';
+              const isReturnStage = [BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A, BookingStatus.ARRIVED_AT_ORIGIN_RETURN].includes(trip?.status as BookingStatus);
+
+              if (isExchange && isReturnStage) {
+                return (
+                  <div className="mt-6 bg-amber-50 dark:bg-amber-900/10 rounded-xl p-4 flex items-center justify-between">
+                    <div className="flex flex-col">
+                      <span className="text-[10px] uppercase font-bold text-amber-600 tracking-widest mb-1">Return OTP</span>
+                      <span className="text-2xl font-bold tracking-[0.2em] font-mono dark:text-white">{trip?.exchange?.returnOtp || '----'}</span>
+                    </div>
+                    <span className="material-symbols-outlined text-amber-500 text-3xl">shield</span>
+                  </div>
+                );
+              }
+
+              // Exchange: show handover OTP when driver is heading to or at receiver
+              const isHandoverStage = [BookingStatus.IN_TRANSIT, BookingStatus.ARRIVED_AT_RECEIVER].includes(trip?.status as BookingStatus);
+              if (isExchange && isHandoverStage) {
+                return (
+                  <div className="mt-6 bg-rose-50 dark:bg-rose-900/10 rounded-xl p-4 flex items-center justify-between">
+                    <div className="flex flex-col">
+                      <span className="text-[10px] uppercase font-bold text-rose-600 tracking-widest mb-1">Handover OTP (share with receiver)</span>
+                      <span className="text-2xl font-bold tracking-[0.2em] font-mono dark:text-white">{trip?.exchange?.productAHandoverOtp || '----'}</span>
+                    </div>
+                    <span className="material-symbols-outlined text-rose-500 text-3xl">swap_horiz</span>
+                  </div>
+                );
+              }
+
+              // Default: show pickup OTP
+              return (
+                <div className="mt-6 bg-blue-50 dark:bg-primary/10 rounded-xl p-4 flex items-center justify-between">
+                  <div className="flex flex-col">
+                    <span className="text-[10px] uppercase font-bold text-primary tracking-widest mb-1">Pickup OTP</span>
+                    <span className="text-2xl font-bold tracking-[0.2em] font-mono dark:text-white">{trip?.pickupPin || '----'}</span>
+                  </div>
+                  <span className="material-symbols-outlined text-primary text-3xl">shield</span>
+                </div>
+              );
+            })()}
           </>
         ) : (
           <div className="py-10 flex flex-col items-center text-center gap-4">
@@ -395,32 +500,69 @@ const Tracking: React.FC = () => {
           </div>
         )}
 
-        <div className="mt-6 flex flex-col gap-6 relative pl-2">
-          <div className="absolute left-[13px] top-3 bottom-6 w-[2px] bg-slate-100 dark:bg-slate-800"></div>
-          <div className="flex items-start gap-4 relative">
-            <div className="z-10 size-7 rounded-full bg-green-500 text-white flex items-center justify-center ring-4 ring-white dark:ring-slate-900">
-              <span className="material-symbols-outlined text-sm font-bold">check</span>
+        {/* Live Progress Timeline */}
+        {(() => {
+          const isExchangeTrip = trip?.serviceType === 'exchange';
+          const s = trip?.status as BookingStatus;
+
+          const exchangeDoneStatuses = (targets: BookingStatus[]) => targets.includes(s);
+
+          const exchangeSteps = [
+            { key: 'placed', label: 'Order Placed', sub: 'Exchange booking confirmed', icon: 'check_circle', done: true },
+            { key: 'assigned', label: 'Driver Assigned', sub: driverName ? `${driverName} assigned` : 'Finding a driver', icon: 'person_pin', done: s !== BookingStatus.SEARCHING },
+            { key: 'product_a', label: 'Product A Picked Up', sub: 'Driver collected your item', icon: 'inventory_2',
+              done: exchangeDoneStatuses([BookingStatus.IN_TRANSIT, BookingStatus.ARRIVED_AT_RECEIVER, BookingStatus.PICKING_UP_PRODUCT_B, BookingStatus.QC_PENDING, BookingStatus.QC_APPROVED, BookingStatus.QC_REJECTED, BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A, BookingStatus.ARRIVED_AT_ORIGIN_RETURN, BookingStatus.EXCHANGE_COMPLETED, BookingStatus.EXCHANGE_FAILED]) },
+            { key: 'at_receiver', label: 'At Receiver Location', sub: 'Driver at receiver for exchange', icon: 'location_on',
+              done: exchangeDoneStatuses([BookingStatus.ARRIVED_AT_RECEIVER, BookingStatus.PICKING_UP_PRODUCT_B, BookingStatus.QC_PENDING, BookingStatus.QC_APPROVED, BookingStatus.QC_REJECTED, BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A, BookingStatus.ARRIVED_AT_ORIGIN_RETURN, BookingStatus.EXCHANGE_COMPLETED, BookingStatus.EXCHANGE_FAILED]) },
+            { key: 'product_b', label: 'Product B Collected', sub: 'Return item collected', icon: 'package_2',
+              done: exchangeDoneStatuses([BookingStatus.QC_PENDING, BookingStatus.QC_APPROVED, BookingStatus.RETURNING_PRODUCT_B, BookingStatus.ARRIVED_AT_ORIGIN_RETURN, BookingStatus.EXCHANGE_COMPLETED]) },
+            ...(trip?.exchange?.qcRequired ? [{ key: 'qc', label: 'Quality Check',
+              sub: trip?.exchange?.qcDecision === 'approved' ? 'Approved' : trip?.exchange?.qcDecision === 'rejected' ? 'Rejected' : 'Awaiting your review',
+              icon: 'verified',
+              done: exchangeDoneStatuses([BookingStatus.QC_APPROVED, BookingStatus.QC_REJECTED, BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A, BookingStatus.ARRIVED_AT_ORIGIN_RETURN, BookingStatus.EXCHANGE_COMPLETED, BookingStatus.EXCHANGE_FAILED]) }] : []),
+            { key: 'returning', label: 'Returning to You', sub: trip?.exchange?.failureReason ? 'Returning Product A' : 'Returning Product B', icon: 'undo',
+              done: exchangeDoneStatuses([BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A, BookingStatus.ARRIVED_AT_ORIGIN_RETURN, BookingStatus.EXCHANGE_COMPLETED, BookingStatus.EXCHANGE_FAILED]) },
+            { key: 'done', label: 'Completed', sub: 'Exchange finished', icon: 'task_alt',
+              done: exchangeDoneStatuses([BookingStatus.EXCHANGE_COMPLETED, BookingStatus.EXCHANGE_FAILED]) },
+          ];
+
+          const parcelSteps = [
+            { key: 'placed', label: 'Order Placed', sub: 'Booking confirmed', icon: 'check_circle', done: true },
+            { key: 'assigned', label: 'Driver Assigned', sub: driverName ? `${driverName} is assigned` : 'Finding a driver', icon: 'person_pin', done: s !== BookingStatus.SEARCHING },
+            { key: 'at_pickup', label: 'Arrived at Pickup', sub: 'Driver reached pickup point', icon: 'location_on', done: [BookingStatus.ARRIVED_AT_PICKUP, BookingStatus.PICKING_UP, BookingStatus.IN_TRANSIT, BookingStatus.ARRIVED_AT_DESTINATION, BookingStatus.DROPPING_OFF].includes(s) },
+            { key: 'picked_up', label: 'Parcel Picked Up', sub: 'On the way to destination', icon: 'inventory_2', done: [BookingStatus.IN_TRANSIT, BookingStatus.ARRIVED_AT_DESTINATION, BookingStatus.DROPPING_OFF].includes(s) },
+            { key: 'at_dest', label: 'At Destination', sub: 'Driver reached drop location', icon: 'flag', done: [BookingStatus.ARRIVED_AT_DESTINATION, BookingStatus.DROPPING_OFF].includes(s) },
+            { key: 'delivered', label: 'Delivered', sub: 'Parcel handed over', icon: 'verified', done: s === BookingStatus.COMPLETED },
+          ];
+
+          const steps = isExchangeTrip ? exchangeSteps : parcelSteps;
+          const activeIdx = steps.findIndex(st => !st.done);
+          return (
+            <div className="mt-6 flex flex-col gap-4 relative pl-2">
+              <div className="absolute left-[13px] top-3 bottom-3 w-[2px] bg-slate-100 dark:bg-slate-800"></div>
+              {steps.map((s, i) => (
+                <div key={s.key} className={`flex items-start gap-4 relative ${!s.done && i !== activeIdx ? 'opacity-40' : ''}`}>
+                  <div className={`z-10 size-7 rounded-full flex items-center justify-center ring-4 ring-white dark:ring-slate-900 shrink-0 ${
+                    s.done ? 'bg-green-500 text-white' :
+                    i === activeIdx ? 'bg-primary text-white animate-pulse' :
+                    'bg-slate-200 dark:bg-slate-800 text-slate-400'
+                  }`}>
+                    <span className="material-symbols-outlined text-sm">{s.done ? 'check' : s.icon}</span>
+                  </div>
+                  <div className="flex flex-col">
+                    <span className={`text-sm font-bold ${s.done || i === activeIdx ? 'dark:text-white' : 'text-slate-400'}`}>{s.label}</span>
+                    <span className="text-xs text-slate-400">{s.sub}</span>
+                  </div>
+                </div>
+              ))}
             </div>
-            <div className="flex flex-col">
-              <span className="text-sm font-bold dark:text-white">Order Placed</span>
-              <span className="text-xs text-slate-400">Just now</span>
-            </div>
-          </div>
-          <div className={`flex items-start gap-4 relative ${trip?.status === BookingStatus.SEARCHING ? 'opacity-50' : ''}`}>
-            <div className={`z-10 size-7 rounded-full flex items-center justify-center ring-4 ring-white dark:ring-slate-900 ${trip?.status !== BookingStatus.SEARCHING ? 'bg-green-500 text-white' : 'bg-slate-200 dark:bg-slate-800 text-slate-400'}`}>
-              <span className="material-symbols-outlined text-sm">local_shipping</span>
-            </div>
-            <div className="flex flex-col">
-              <span className="text-sm font-semibold dark:text-white">Driver Assigned</span>
-              <span className="text-xs dark:text-slate-500">{trip?.status !== BookingStatus.SEARCHING ? 'Driver is on the way' : 'Waiting...'}</span>
-            </div>
-          </div>
-        </div>
+          );
+        })()}
 
         {/* Simulation Button for Demo */}
         {!tripId && (
           <div className="mt-8">
-            <button 
+            <button
               onClick={() => setTripCompleted(true)}
               className="w-full py-4 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-400 font-bold text-xs uppercase tracking-widest rounded-2xl"
             >

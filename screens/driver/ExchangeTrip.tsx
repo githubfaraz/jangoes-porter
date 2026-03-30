@@ -34,7 +34,23 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
     setLoading(true);
     try {
       await updateDoc(doc(db, 'trips', tripId), { status: s, ...extra, updatedAt: new Date().toISOString() });
-    } catch (e) { console.error('Update error:', e); alert('Action failed. Please try again.'); }
+
+      // Deduct wallet on exchange completion (both success and failure — driver did the work)
+      if ((s === BookingStatus.EXCHANGE_COMPLETED || s === BookingStatus.EXCHANGE_FAILED) && trip.customerId && (trip as any).paymentMethod === 'wallet') {
+        try {
+          await fetch('/api/deduct-fare', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              customerId: trip.customerId,
+              amount: trip.fare || 0,
+              tripId,
+              description: `Exchange trip — ${trip.pickup?.address?.split(',')[0] || 'Origin'} ↔ ${trip.dropoff?.address?.split(',')[0] || 'Destination'}`,
+            }),
+          });
+        } catch (err) { console.error('Wallet deduction error:', err); }
+      }
+    } catch (e: any) { console.error('Update error:', e); alert('Action failed: ' + (e?.message || 'Please try again.')); }
     finally { setLoading(false); }
   };
 
@@ -113,6 +129,13 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
           <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3">
             <p className="text-[10px] font-black text-blue-600 uppercase mb-1">Product A to collect</p>
             <p className="text-sm font-medium">{exchange?.productA?.description || 'Item'}</p>
+            {exchange?.productA?.referencePhotos?.length > 0 && (
+              <div className="flex gap-2 mt-2 overflow-x-auto">
+                {exchange.productA.referencePhotos.map((url: string, i: number) => (
+                  <img key={i} src={url} className="size-16 rounded-lg object-cover border shrink-0" alt="" />
+                ))}
+              </div>
+            )}
           </div>
           <button onClick={() => update(BookingStatus.ARRIVED_AT_PICKUP)} disabled={loading}
             className="w-full h-14 bg-primary text-white font-black rounded-2xl shadow-lg flex items-center justify-center gap-2 disabled:opacity-50">
@@ -179,6 +202,13 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
           <div className="bg-green-50 rounded-xl p-3">
             <p className="text-[10px] font-black text-green-600 uppercase mb-1">Product B to collect</p>
             <p className="text-sm font-medium">{exchange?.productB?.description || 'Item'}</p>
+            {exchange?.productB?.referencePhotos?.length > 0 && (
+              <div className="flex gap-2 mt-2 overflow-x-auto">
+                {exchange.productB.referencePhotos.map((url: string, i: number) => (
+                  <img key={i} src={url} className="size-16 rounded-lg object-cover border shrink-0" alt="" />
+                ))}
+              </div>
+            )}
           </div>
           <button onClick={() => update(BookingStatus.ARRIVED_AT_RECEIVER)} disabled={loading}
             className="w-full h-14 bg-primary text-white font-black rounded-2xl shadow-lg flex items-center justify-center gap-2 disabled:opacity-50">
@@ -194,13 +224,28 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
           <div className="p-3 bg-green-50 rounded-2xl text-center">
             <p className="text-xs font-bold text-green-600 uppercase tracking-widest">At Receiver Location</p>
           </div>
+          <div className="bg-blue-50 rounded-xl p-3">
+            <p className="text-[10px] font-black text-blue-600 uppercase mb-1">Hand over Product A to receiver</p>
+            <p className="text-sm font-medium">{exchange?.productA?.description || 'Item'}</p>
+          </div>
+          <div className="flex flex-col gap-2">
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Enter Handover OTP (from receiver)</label>
+            <input type="text" maxLength={4} value={handoverOtpInput} onChange={e => setHandoverOtpInput(e.target.value)}
+              className="w-full h-14 bg-white border-2 border-slate-100 rounded-2xl px-5 text-center text-2xl font-black tracking-[0.5em] focus:border-primary" placeholder="----" />
+          </div>
           <p className="text-sm text-slate-600 font-medium text-center">Is Product B available for collection?</p>
           <div className="flex gap-3">
-            <button onClick={() => { setProductBAvailable(true); update(BookingStatus.PICKING_UP_PRODUCT_B); }} disabled={loading}
+            <button onClick={() => {
+              if (!exchange?.productAHandoverOtp || handoverOtpInput !== exchange.productAHandoverOtp) { alert('Invalid Handover OTP'); return; }
+              setProductBAvailable(true); update(BookingStatus.PICKING_UP_PRODUCT_B);
+            }} disabled={loading}
               className="flex-1 h-14 bg-green-600 text-white font-black rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50">
               <span className="material-symbols-outlined">check</span>Yes, Available
             </button>
-            <button onClick={() => { setProductBAvailable(false); update(BookingStatus.RETURNING_PRODUCT_A, { 'exchange.failureReason': 'product_b_unavailable' }); }} disabled={loading}
+            <button onClick={() => {
+              if (!exchange?.productAHandoverOtp || handoverOtpInput !== exchange.productAHandoverOtp) { alert('Invalid Handover OTP'); return; }
+              setProductBAvailable(false); update(BookingStatus.RETURNING_PRODUCT_A, { 'exchange.failureReason': 'product_b_unavailable' });
+            }} disabled={loading}
               className="flex-1 h-14 bg-red-500 text-white font-black rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50">
               <span className="material-symbols-outlined">close</span>Not Available
             </button>

@@ -23,7 +23,7 @@ interface KycData {
   vehiclePhotos?: string[];
 }
 
-const DriverProfile: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
+const DriverProfile: React.FC<{ onLogout: () => void; canSwitchRole?: boolean; onSwitchRole?: () => void }> = ({ onLogout, canSwitchRole, onSwitchRole }) => {
   const navigate = useNavigate();
   const [driverName, setDriverName] = useState('');
   const [driverPhoto, setDriverPhoto] = useState('');
@@ -65,6 +65,9 @@ const DriverProfile: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
       icon: 'badge',
       number: kycData.panNumber || '',
       status: kycData.panStatus || 'verified',
+      adminUploadUrl: kycData.panAdminUploadUrl,
+      adminUploadedBy: kycData.panAdminUploadedByName,
+      adminUploadedAt: kycData.panAdminUploadedAt,
     },
     {
       name: "Driving License",
@@ -72,12 +75,18 @@ const DriverProfile: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
       number: kycData.dlNumber || '',
       status: kycData.dlStatus || 'verified',
       extra: kycData.dlDoe ? `Expires: ${kycData.dlDoe}` : '',
+      adminUploadUrl: kycData.dlAdminUploadUrl,
+      adminUploadedBy: kycData.dlAdminUploadedByName,
+      adminUploadedAt: kycData.dlAdminUploadedAt,
     },
     {
       name: 'RC / Vehicle Registration',
       icon: 'assignment',
       number: kycData.rcNumber || '',
       status: kycData.rcVerifyStatus || 'verified',
+      adminUploadUrl: kycData.rcAdminUploadUrl,
+      adminUploadedBy: kycData.rcAdminUploadedByName,
+      adminUploadedAt: kycData.rcAdminUploadedAt,
     },
     {
       name: 'Profile Photo',
@@ -213,14 +222,29 @@ const DriverProfile: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
                     <div className="size-11 rounded-2xl bg-slate-50 dark:bg-slate-800 flex items-center justify-center text-slate-400">
                       <span className="material-symbols-outlined">{d.icon}</span>
                     </div>
-                    <div className="flex flex-col">
+                    <div className="flex flex-col flex-1">
                       <span className="text-sm font-bold text-slate-900 dark:text-white">{d.name}</span>
                       <span className="text-[9px] text-slate-400 font-black uppercase tracking-widest mt-0.5">
                         {d.number || (d as any).extra || ''}
                       </span>
+                      {(d as any).adminUploadUrl && (
+                        <div className="mt-2 bg-blue-50 dark:bg-blue-900/20 rounded-xl px-3 py-2">
+                          <div className="flex items-center gap-1.5">
+                            <span className="material-symbols-outlined text-blue-500 text-xs">verified</span>
+                            <span className="text-[10px] text-blue-600 dark:text-blue-400 font-bold">
+                              Verified by {(d as any).adminUploadedBy || 'Admin'}
+                            </span>
+                          </div>
+                          {(d as any).adminUploadedAt && (
+                            <span className="text-[9px] text-blue-400 block mt-0.5">
+                              {new Date((d as any).adminUploadedAt).toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' })}
+                            </span>
+                          )}
+                        </div>
+                      )}
                     </div>
                   </div>
-                  <span className={`text-[8px] font-black px-2.5 py-1 rounded-full uppercase tracking-widest ${badge.color}`}>
+                  <span className={`text-[8px] font-black px-2.5 py-1 rounded-full uppercase tracking-widest shrink-0 ${badge.color}`}>
                     {badge.label}
                   </span>
                 </div>
@@ -228,6 +252,16 @@ const DriverProfile: React.FC<{ onLogout: () => void }> = ({ onLogout }) => {
             })}
           </div>
         </section>
+
+        {canSwitchRole && onSwitchRole && (
+          <button
+            onClick={onSwitchRole}
+            className="w-full bg-primary/5 text-primary font-black py-5 rounded-[32px] border border-primary/20 flex items-center justify-center gap-3 active:scale-95 transition-all shadow-sm mb-3"
+          >
+            <span className="material-symbols-outlined filled">person</span>
+            <span className="text-sm uppercase tracking-widest">Switch to Customer Mode</span>
+          </button>
+        )}
 
         <button
           onClick={onLogout}

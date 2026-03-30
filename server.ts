@@ -151,7 +151,7 @@ app.post('/api/distance-matrix', async (req, res) => {
     const url = `https://maps.googleapis.com/maps/api/distancematrix/json`
       + `?origins=${origin.lat},${origin.lng}`
       + `&destinations=${destination.lat},${destination.lng}`
-      + `&mode=driving&region=in&key=${apiKey}`;
+      + `&mode=driving&region=in&departure_time=now&key=${apiKey}`;
     const r = await axios.get(url, { timeout: 8000 });
     res.json(r.data);
   } catch (err: any) {
@@ -160,6 +160,156 @@ app.post('/api/distance-matrix', async (req, res) => {
   }
 });
 // ─────────────────────────────────────────────────────────────────────────────
+
+// ─── Driver Info Endpoint (for customer tracking screen) ─────────────────────
+app.get('/api/driver-info/:driverId', async (req, res) => {
+  try {
+    const { driverId } = req.params;
+    const snap = await admin.firestore().collection('users').doc(driverId).get();
+    if (!snap.exists) return res.json({ found: false });
+
+    const d = snap.data()!;
+    // Extract kycData from both flat and nested formats
+    const kd: Record<string, any> = {};
+    for (const [key, value] of Object.entries(d)) {
+      if (key.startsWith('kycData.')) kd[key.slice(8)] = value;
+    }
+    if (d.kycData && typeof d.kycData === 'object') Object.assign(kd, d.kycData);
+
+    // Calculate average rating
+    const tripsSnap = await admin.firestore().collection('trips')
+      .where('driverId', '==', driverId)
+      .where('status', '==', 'COMPLETED')
+      .get();
+    let totalRating = 0, ratedCount = 0;
+    tripsSnap.docs.forEach(t => {
+      const r = t.data().rating;
+      if (r && r > 0) { totalRating += r; ratedCount++; }
+    });
+    const avgRating = ratedCount > 0 ? Math.round(totalRating / ratedCount * 10) / 10 : 0;
+
+    res.json({
+      found: true,
+      name: d.name || 'Driver',
+      photoURL: d.photoURL || kd.selfieUrl || '',
+      phoneNumber: d.phoneNumber || driverId.replace('phone_', ''),
+      vehicleModel: kd.rcMakerModel || '',
+      rcNumber: kd.rcNumber || '',
+      vehicleCategory: d.vehicleCategory || '',
+      rating: avgRating,
+      totalTrips: tripsSnap.size,
+    });
+  } catch (err: any) {
+    console.error('[DriverInfo]', err.message);
+    res.json({ found: false });
+  }
+});
+
+// ─── Wallet Deduction Endpoint ───────────────────────────────────────────────
+app.post('/api/deduct-fare', async (req, res) => {
+  const { customerId, amount, tripId, description } = req.body;
+  if (!customerId || !amount || !tripId) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+  try {
+    const customerRef = admin.firestore().collection('users').doc(customerId);
+    const customerSnap = await customerRef.get();
+    const currentBalance = customerSnap.data()?.walletBalance ?? 0;
+
+    // Only deduct if wallet has sufficient balance
+    if (currentBalance < amount) {
+      return res.status(400).json({ error: 'Insufficient wallet balance' });
+    }
+
+    await customerRef.update({
+      walletBalance: admin.firestore.FieldValue.increment(-amount),
+    });
+    await admin.firestore().collection('users').doc(customerId).collection('transactions').add({
+      amount,
+      type: 'debit',
+      description: description || 'Trip fare',
+      tripId,
+      createdAt: admin.firestore.FieldValue.serverTimestamp(),
+    });
+
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('[DeductFare]', err.message);
+    res.status(500).json({ error: 'Deduction failed' });
+  }
+});
+
+// ─── Driver Availability Endpoint ────────────────────────────────────────────
+app.get('/api/driver-availability', async (_req, res) => {
+  try {
+    const snap = await admin.firestore().collection('users')
+      .where('role', '==', 'DRIVER')
+      .where('kycCompleted', '==', true)
+      .get();
+    const counts: Record<string, number> = {};
+    snap.docs.forEach(d => {
+      const data = d.data();
+      if (data.disabled) return; // skip deactivated drivers
+      const cat = data.vehicleCategory;
+      if (cat) counts[cat] = (counts[cat] || 0) + 1;
+    });
+    res.json({ counts });
+  } catch (err: any) {
+    console.error('[DriverAvailability]', err.message);
+    res.json({ counts: {} });
+  }
+});
+
+// ─── Fare Validation Endpoint ────────────────────────────────────────────────
+app.post('/api/validate-fare', async (req, res) => {
+  const { origin, destination, vehicleId, clientFare } = req.body;
+  if (!origin?.lat || !destination?.lat || !vehicleId || clientFare == null) {
+    return res.status(400).json({ error: 'Missing required fields' });
+  }
+  try {
+    const apiKey = process.env.VITE_GOOGLE_MAPS_API_KEY;
+    const dmUrl = `https://maps.googleapis.com/maps/api/distancematrix/json`
+      + `?origins=${origin.lat},${origin.lng}&destinations=${destination.lat},${destination.lng}`
+      + `&mode=driving&region=in&departure_time=now&key=${apiKey}`;
+    const dmRes = await axios.get(dmUrl, { timeout: 8000 });
+    const el = dmRes.data?.rows?.[0]?.elements?.[0];
+    if (!el || el.status !== 'OK') {
+      return res.json({ valid: true, reason: 'distance_api_failed' }); // graceful pass
+    }
+
+    const distanceKm = el.distance.value / 1000;
+    const durationMins = Math.ceil((el.duration_in_traffic?.value || el.duration.value) / 60);
+
+    // Load rates from Firestore
+    let rates: Record<string, any> = {};
+    try {
+      const ratesDoc = await admin.firestore().doc('config/vehicleRates').get();
+      if (ratesDoc.exists) rates = ratesDoc.data()?.rates || {};
+    } catch { /* use empty, will fall through to default calc */ }
+
+    const rate = rates[vehicleId];
+    if (!rate?.baseFare) {
+      return res.json({ valid: true, reason: 'rate_not_found' }); // graceful pass
+    }
+
+    // Calculate server-side fare
+    const billableKm = Math.max(0, distanceKm - (rate.includedKm || 4));
+    const baseFare = rate.baseFare || 0;
+    const distanceCharge = Math.round(billableKm * (rate.perKmRate || 0));
+    const timeCharge = Math.round(durationMins * (rate.perMinuteRate || 0));
+    const tripFare = Math.max(baseFare + distanceCharge + timeCharge, rate.minFare || 0);
+    const gst = Math.round(tripFare * (rate.gstPercent || 5) / 100);
+    const serverFare = tripFare + gst;
+
+    const diff = serverFare > 0 ? Math.abs(clientFare - serverFare) / serverFare : 0;
+    const valid = diff <= 0.10;
+
+    res.json({ valid, serverFare, clientFare, difference: Math.round(diff * 100) });
+  } catch (err: any) {
+    console.error('[FareValidation]', err.message);
+    res.json({ valid: true, reason: 'validation_error' }); // graceful pass on error
+  }
+});
 
 // ─── Surepass KYC Proxy Routes ───────────────────────────────────────────────
 const SUREPASS_BASE = process.env.SUREPASS_BASE_URL || 'https://sandbox.surepass.io';

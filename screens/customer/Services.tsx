@@ -1,10 +1,18 @@
 
-import React from 'react';
+import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { SERVICES } from '../../constants.tsx';
+import { loadAppSettings } from '../../services/appSettings.ts';
 
 const Services: React.FC = () => {
   const navigate = useNavigate();
+  const [enabledServices, setEnabledServices] = useState<Record<string, boolean>>({});
+
+  useEffect(() => {
+    loadAppSettings().then(s => setEnabledServices(s.services || {}));
+  }, []);
+
+  const activeServices = SERVICES.filter(s => enabledServices[s.id] !== false);
 
   return (
     <div className="flex flex-col h-full bg-background-light dark:bg-background-dark min-h-screen">
@@ -27,7 +35,7 @@ const Services: React.FC = () => {
           </div>
 
           <div className="grid grid-cols-1 gap-4">
-            {SERVICES.map((service) => (
+            {activeServices.map((service) => (
               <button
                 key={service.id}
                 onClick={() => navigate('/search', { state: { serviceType: service.id } })}

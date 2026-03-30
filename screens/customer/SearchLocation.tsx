@@ -10,7 +10,7 @@ interface AddressDetails {
   building: string;
   name: string;
   mobile: string;
-  type: 'Home' | 'Shop' | 'Other' | null;
+  type: 'Home' | 'Work' | 'Other' | null;
 }
 
 type ViewState = 'route_summary' | 'search_selection' | 'map_picker' | 'details_form';
@@ -541,7 +541,7 @@ const SearchLocation: React.FC = () => {
           <div className="flex gap-4">
              {[
                { id: 'Home', icon: 'home' },
-               { id: 'Shop', icon: 'storefront' },
+               { id: 'Work', icon: 'work' },
                { id: 'Other', icon: 'favorite' }
              ].map((type) => (
                <button 

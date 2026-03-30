@@ -80,6 +80,31 @@ export interface Trip {
   ratedAt?: string;
   cancelReason?: string;
   cancelledBy?: string;
+  receiverRating?: number;
+  receiverFeedback?: string;
+  receiverRatedAt?: string;
+  // V2 fare fields
+  fareVersion?: number;
+  estimatedTripFare?: number;
+  estimatedTotal?: number;
+  durationMins?: number;
+  arrivedAtPickupAt?: string;
+  tripStartedAt?: string;
+  arrivedAtDestinationAt?: string;
+  completedAt?: string;
+  finalFare?: {
+    tripFare: number;
+    loadingWaitMins: number;
+    loadingWaitCharge: number;
+    unloadingWaitMins: number;
+    unloadingWaitCharge: number;
+    taxable: number;
+    gst: number;
+    total: number;
+  };
+  paymentMethod?: 'cash' | 'online';
+  paymentConfirmed?: boolean;
+  serverValidatedFare?: number;
   // Service type discriminator
   serviceType?: 'parcel' | 'reverse-parcel' | 'exchange';
   // Exchange-specific fields

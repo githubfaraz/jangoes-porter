@@ -1,47 +1,55 @@
-import React, { useEffect, useState } from 'react';
+import React from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { onAuthStateChanged, signOut } from 'firebase/auth';
-import { doc, getDoc } from 'firebase/firestore';
-import { auth, db } from '../src/firebase';
+import { signOut } from 'firebase/auth';
+import { auth } from '../src/firebase';
+import { AdminAuthProvider, useAdminAuth } from './hooks/useAdminAuth';
 import Login from './screens/Login';
 import Layout from './screens/Layout';
 import Dashboard from './screens/Dashboard';
 import Trips from './screens/Trips';
 import Drivers from './screens/Drivers';
 import Customers from './screens/Customers';
+import FareConfig from './screens/FareConfig';
+import AdminUsers from './screens/AdminUsers';
+import ActivityLogs from './screens/ActivityLogs';
+import ServiceConfig from './screens/ServiceConfig';
 
-type AuthState = 'loading' | 'unauthenticated' | 'admin' | 'not-admin';
+/** Renders children only if the admin has the required permission */
+function ProtectedRoute({ permission, children }: { permission: string; children: React.ReactNode }) {
+  const { can } = useAdminAuth();
+  if (!can(permission)) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <span className="material-symbols-outlined text-red-400 text-5xl">lock</span>
+          <p className="text-gray-500 mt-3 font-semibold">You don't have permission to access this page.</p>
+        </div>
+      </div>
+    );
+  }
+  return <>{children}</>;
+}
 
-export default function AdminApp() {
-  const [authState, setAuthState] = useState<AuthState>('loading');
-  const [adminName, setAdminName] = useState('');
-  const [adminEmail, setAdminEmail] = useState('');
+/** Super admin only route */
+function SuperAdminRoute({ children }: { children: React.ReactNode }) {
+  const { isSuperAdmin } = useAdminAuth();
+  if (!isSuperAdmin) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <div className="text-center">
+          <span className="material-symbols-outlined text-red-400 text-5xl">admin_panel_settings</span>
+          <p className="text-gray-500 mt-3 font-semibold">Only Super Admin can access this page.</p>
+        </div>
+      </div>
+    );
+  }
+  return <>{children}</>;
+}
 
-  useEffect(() => {
-    const unsub = onAuthStateChanged(auth, async (user) => {
-      if (!user) {
-        setAuthState('unauthenticated');
-        return;
-      }
-      try {
-        const snap = await getDoc(doc(db, 'users', user.uid));
-        if (snap.exists() && snap.data()?.role === 'ADMIN') {
-          setAdminName(snap.data()?.name || user.email || 'Admin');
-          setAdminEmail(user.email || '');
-          setAuthState('admin');
-        } else {
-          await signOut(auth);
-          setAuthState('not-admin');
-        }
-      } catch {
-        await signOut(auth);
-        setAuthState('unauthenticated');
-      }
-    });
-    return unsub;
-  }, []);
+function AdminRoutes() {
+  const { loading, authenticated, isAdmin } = useAdminAuth();
 
-  if (authState === 'loading') {
+  if (loading) {
     return (
       <div className="flex items-center justify-center h-screen bg-primary-dark">
         <div className="text-center text-white">
@@ -52,17 +60,19 @@ export default function AdminApp() {
     );
   }
 
-  if (authState === 'not-admin') {
+  if (!authenticated) {
+    return <Login onLogin={() => {}} />;
+  }
+
+  if (!isAdmin) {
     return (
       <div className="flex items-center justify-center h-screen bg-gray-100">
         <div className="bg-white rounded-2xl p-8 shadow-lg max-w-sm w-full mx-4 text-center">
           <span className="material-symbols-outlined text-red-500 text-5xl">block</span>
           <h2 className="text-xl font-bold mt-3 text-gray-800">Access Denied</h2>
-          <p className="text-gray-500 text-sm mt-2">
-            Your account does not have admin privileges.
-          </p>
+          <p className="text-gray-500 text-sm mt-2">Your account does not have admin privileges.</p>
           <button
-            onClick={() => { signOut(auth); setAuthState('unauthenticated'); }}
+            onClick={() => signOut(auth)}
             className="mt-6 w-full bg-primary text-white py-3 rounded-xl font-semibold text-sm hover:bg-primary-dark transition-colors"
           >
             Sign Out
@@ -72,21 +82,29 @@ export default function AdminApp() {
     );
   }
 
-  if (authState === 'unauthenticated') {
-    return <Login onLogin={() => {}} />;
-  }
-
   return (
     <HashRouter>
-      <Layout adminName={adminName} adminEmail={adminEmail}>
+      <Layout>
         <Routes>
-          <Route path="/" element={<Dashboard />} />
-          <Route path="/trips" element={<Trips />} />
-          <Route path="/drivers" element={<Drivers />} />
-          <Route path="/customers" element={<Customers />} />
+          <Route path="/" element={<ProtectedRoute permission="dashboard"><Dashboard /></ProtectedRoute>} />
+          <Route path="/trips" element={<ProtectedRoute permission="trips"><Trips /></ProtectedRoute>} />
+          <Route path="/drivers" element={<ProtectedRoute permission="drivers"><Drivers /></ProtectedRoute>} />
+          <Route path="/customers" element={<ProtectedRoute permission="customers"><Customers /></ProtectedRoute>} />
+          <Route path="/fare-config" element={<ProtectedRoute permission="fare_config"><FareConfig /></ProtectedRoute>} />
+          <Route path="/admin-users" element={<SuperAdminRoute><AdminUsers /></SuperAdminRoute>} />
+          <Route path="/activity-logs" element={<SuperAdminRoute><ActivityLogs /></SuperAdminRoute>} />
+          <Route path="/service-config" element={<SuperAdminRoute><ServiceConfig /></SuperAdminRoute>} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Layout>
     </HashRouter>
+  );
+}
+
+export default function AdminApp() {
+  return (
+    <AdminAuthProvider>
+      <AdminRoutes />
+    </AdminAuthProvider>
   );
 }

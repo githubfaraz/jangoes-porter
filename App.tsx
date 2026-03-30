@@ -40,6 +40,7 @@ import SetupProfile from './screens/shared/SetupProfile.tsx';
 const App: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
   const [userRole, setUserRole] = useState<UserRole>(UserRole.CUSTOMER);
+  const [userRoles, setUserRoles] = useState<string[]>([]);
   const [isKycDone, setIsKycDone] = useState(false);
   const [isKycVerified, setIsKycVerified] = useState(false);
   const [isProfileComplete, setIsProfileComplete] = useState(false);
@@ -50,36 +51,48 @@ const App: React.FC = () => {
     let unsubFirestore: (() => void) | null = null;
 
     const unsubAuth = onAuthStateChanged(auth, (user) => {
+      console.log('[APP] onAuthStateChanged —', user ? `uid: ${user.uid}` : 'NULL (no user)');
       // Clean up previous Firestore listener
       if (unsubFirestore) { unsubFirestore(); unsubFirestore = null; }
 
       if (user) {
         setIsLoggedIn(true);
         // Real-time listener so admin approval instantly unlocks the dashboard
-        unsubFirestore = onSnapshot(doc(db, 'users', user.uid), (snap) => {
-          console.log('[APP] onSnapshot — exists:', snap.exists(), 'uid:', user.uid);
-          if (snap.exists()) {
-            const d = snap.data();
-            const kycDone = d.kycCompleted || false;
-            const kycVerified = d.kycAllVerified === true;
+        unsubFirestore = onSnapshot(
+          doc(db, 'users', user.uid),
+          (snap) => {
+            console.log('[APP] onSnapshot — exists:', snap.exists(), 'uid:', user.uid);
+            if (snap.exists()) {
+              const d = snap.data();
+              const kycDone = d.kycCompleted || false;
+              const kycVerified = d.kycAllVerified === true;
 
-            console.log('[APP] onSnapshot fired —', {
-              kycCompleted: d.kycCompleted,
-              kycAllVerified: d.kycAllVerified,
-              kycDone,
-              kycVerified,
-              role: d.role,
-              name: d.name,
-              kycDataKeys: Object.keys(extractKycData(d)),
-            });
+              console.log('[APP] onSnapshot fired —', {
+                kycCompleted: d.kycCompleted,
+                kycAllVerified: d.kycAllVerified,
+                kycDone,
+                kycVerified,
+                role: d.role,
+                name: d.name,
+              });
 
-            setUserRole(d.role as UserRole);
-            setIsKycDone(kycDone);
-            setIsKycVerified(kycVerified);
-            setIsProfileComplete(!!(d.name));
+              const roles: string[] = d.roles || [d.role];
+              setUserRoles(roles);
+              setUserRole(d.role as UserRole);
+              setIsKycDone(kycDone);
+              setIsKycVerified(kycVerified);
+              setIsProfileComplete(!!(d.name));
+            } else {
+              console.log('[APP] User document does not exist yet — waiting for creation');
+            }
+            setLoading(false);
+          },
+          (error) => {
+            console.error('[APP] onSnapshot ERROR:', error.code, error.message);
+            // Don't sign out on permission errors — the document might not exist yet
+            setLoading(false);
           }
-          setLoading(false);
-        });
+        );
       } else {
         console.log('[APP] onAuthStateChanged — user is null (logged out)');
         setIsLoggedIn(false);
@@ -101,6 +114,20 @@ const App: React.FC = () => {
     setUserRole(role);
     setIsLoggedIn(true);
   };
+
+  const handleSwitchRole = async () => {
+    const newRole = userRole === UserRole.CUSTOMER ? UserRole.DRIVER : UserRole.CUSTOMER;
+    if (!userRoles.includes(newRole)) return;
+    const user = auth.currentUser;
+    if (user) {
+      // Update active role in Firestore
+      const { setDoc: sd } = await import('firebase/firestore');
+      await sd(doc(db, 'users', user.uid), { role: newRole }, { merge: true });
+    }
+    setUserRole(newRole);
+  };
+
+  const canSwitchRole = userRoles.length > 1 || (userRole === UserRole.CUSTOMER && userRoles.includes(UserRole.DRIVER));
 
   const handleLogout = async () => {
     await signOut(auth);
@@ -166,7 +193,7 @@ const App: React.FC = () => {
                       <Route path="/summary" element={<OrderSummary />} />
                       <Route path="/tracking" element={<Tracking />} />
                       <Route path="/wallet" element={<CustomerWallet />} />
-                      <Route path="/profile" element={<CustomerProfile onLogout={handleLogout} />} />
+                      <Route path="/profile" element={<CustomerProfile onLogout={handleLogout} canSwitchRole={userRoles.includes(UserRole.DRIVER)} onSwitchRole={handleSwitchRole} />} />
                       <Route path="*" element={<Navigate to="/home" />} />
                     </>
                   )}
@@ -193,7 +220,7 @@ const App: React.FC = () => {
                       <Route path="/dashboard" element={<DriverDashboard />} />
                       <Route path="/payouts" element={<DriverPayouts />} />
                       <Route path="/active-trip" element={<ActiveTrip />} />
-                      <Route path="/profile" element={<DriverProfile onLogout={handleLogout} />} />
+                      <Route path="/profile" element={<DriverProfile onLogout={handleLogout} canSwitchRole={userRoles.includes(UserRole.CUSTOMER)} onSwitchRole={handleSwitchRole} />} />
                       <Route path="*" element={<Navigate to="/dashboard" />} />
                     </>
                   )}

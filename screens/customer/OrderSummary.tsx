@@ -1,7 +1,7 @@
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { auth, db } from '../../src/firebase.ts';
-import { collection, addDoc, serverTimestamp } from 'firebase/firestore';
+import { collection, addDoc, serverTimestamp, doc, getDoc } from 'firebase/firestore';
 import { BookingStatus } from '../../types.ts';
 
 const OrderSummary: React.FC = () => {
@@ -9,23 +9,40 @@ const OrderSummary: React.FC = () => {
   const location = useLocation();
   const [isBooking, setIsBooking] = useState(false);
   const [error, setError] = useState('');
+  const [walletBalance, setWalletBalance] = useState(0);
+  const [paymentMethod, setPaymentMethod] = useState<'wallet' | 'cash' | 'upi'>('cash');
 
   // All data passed through the booking flow
   const { pickup, drop, parcel, dimensions, vehicle, fare: routeFare, fareBreakdown, distanceKm, serviceType, exchange: exchangeData } = location.state || {};
   const isExchange = serviceType === 'exchange';
-
-  // Fallback guard — if state was lost (e.g. direct URL navigation), go back to search
   const isMissingData = !pickup || !drop;
 
-  // OTPs generated once per mount and held in refs so they don't change on re-render
+  // OTPs
   const pickupPinRef = useRef(Math.floor(1000 + Math.random() * 9000).toString());
   const dropoffOtpRef = useRef(Math.floor(1000 + Math.random() * 9000).toString());
-  // Exchange-specific OTPs
   const returnOtpRef = useRef(Math.floor(1000 + Math.random() * 9000).toString());
   const productBPickupOtpRef = useRef(Math.floor(1000 + Math.random() * 9000).toString());
   const productAHandoverOtpRef = useRef(Math.floor(1000 + Math.random() * 9000).toString());
 
   const fare: number = routeFare ?? dimensions?.estimatedCost ?? 0;
+
+  // Load wallet balance
+  useEffect(() => {
+    const user = auth.currentUser;
+    if (!user) return;
+    getDoc(doc(db, 'users', user.uid)).then(snap => {
+      if (snap.exists()) setWalletBalance(snap.data().walletBalance ?? 0);
+    });
+  }, []);
+
+  // Auto-select: wallet if sufficient, otherwise cash
+  useEffect(() => {
+    if (walletBalance >= fare && fare > 0) {
+      setPaymentMethod('wallet');
+    } else if (paymentMethod === 'wallet') {
+      setPaymentMethod('cash');
+    }
+  }, [walletBalance, fare]);
 
   // Use real breakdown from fareService if available, else split proportionally
   const baseFare       = fareBreakdown?.baseFare        ?? Math.round(fare * 0.64);
@@ -59,7 +76,12 @@ const OrderSummary: React.FC = () => {
           lng:     drop.lng     ?? 0,
         },
         vehicleType:   vehicle?.name  || 'Standard Vehicle',
+        vehicleId:     vehicle?.id    || '',
         fare,
+        fareVersion:   2,
+        estimatedTripFare: fareBreakdown?.tripFare ?? fare,
+        estimatedTotal: fareBreakdown?.estimatedTotal ?? fare,
+        durationMins: fareBreakdown?.durationMins ?? 0,
         createdAt:     serverTimestamp(),
         pickupPin:     pickupPinRef.current,
         dropoffOtp:    dropoffOtpRef.current,
@@ -70,6 +92,7 @@ const OrderSummary: React.FC = () => {
         parcelCategory:   parcel?.category      || '',
         parcelFragile:    parcel?.fragile        || false,
         parcelWeight:     dimensions?.chargeableWeight ?? 0,
+        paymentMethod,
       };
 
       // Add exchange-specific data
@@ -79,11 +102,13 @@ const OrderSummary: React.FC = () => {
             description: exchangeData.productA?.description || '',
             category: exchangeData.productA?.category || '',
             images: [],
+            referencePhotos: exchangeData.productAPhotos || [],
           },
           productB: {
             description: exchangeData.productB?.description || '',
             category: exchangeData.productB?.category || '',
             images: [],
+            referencePhotos: exchangeData.productBPhotos || [],
           },
           qcRequired: exchangeData.qcRequired || false,
           qcInstructions: exchangeData.qcInstructions || '',
@@ -91,6 +116,29 @@ const OrderSummary: React.FC = () => {
           productBPickupOtp: productBPickupOtpRef.current,
           productAHandoverOtp: productAHandoverOtpRef.current,
         };
+      }
+
+      // Server-side fare validation
+      try {
+        const valRes = await fetch('/api/validate-fare', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            origin: { lat: pickup.lat, lng: pickup.lng },
+            destination: { lat: drop.lat, lng: drop.lng },
+            vehicleId: vehicle?.id || '',
+            clientFare: fare,
+          }),
+        });
+        const valData = await valRes.json();
+        if (valData.valid === false) {
+          tripData.serverValidatedFare = valData.serverFare;
+          tripData.fare = valData.serverFare;
+        } else if (valData.serverFare) {
+          tripData.serverValidatedFare = valData.serverFare;
+        }
+      } catch {
+        // Graceful degradation — proceed without validation
       }
 
       const docRef = await addDoc(collection(db, 'trips'), tripData);
@@ -273,6 +321,56 @@ const OrderSummary: React.FC = () => {
 
       </main>
 
+      {/* Payment Method */}
+      <div className="bg-white dark:bg-surface-dark rounded-xl p-5 shadow-sm mx-4 mb-4">
+        <h3 className="text-base font-bold mb-3">Payment Method</h3>
+        <div className="flex flex-col gap-2">
+          {walletBalance >= fare && fare > 0 ? (
+            /* Wallet has sufficient balance — show only wallet */
+            <div className="flex items-center gap-3 p-3 rounded-xl border-2 border-primary bg-primary/5">
+              <div className="size-10 rounded-xl flex items-center justify-center bg-primary text-white">
+                <span className="material-symbols-outlined text-xl">account_balance_wallet</span>
+              </div>
+              <div className="flex-1 text-left">
+                <p className="text-sm font-bold">Pay from Wallet</p>
+                <p className="text-xs text-slate-400">Balance: ₹{walletBalance.toLocaleString('en-IN', { minimumFractionDigits: 2 })}</p>
+              </div>
+              <span className="material-symbols-outlined text-primary">check_circle</span>
+            </div>
+          ) : (
+            /* Wallet insufficient — show Cash and UPI */
+            <>
+              <button
+                onClick={() => setPaymentMethod('cash')}
+                className={`flex items-center gap-3 p-3 rounded-xl border-2 transition-all ${paymentMethod === 'cash' ? 'border-primary bg-primary/5' : 'border-slate-100 dark:border-slate-700'}`}
+              >
+                <div className={`size-10 rounded-xl flex items-center justify-center ${paymentMethod === 'cash' ? 'bg-primary text-white' : 'bg-slate-100 text-slate-400'}`}>
+                  <span className="material-symbols-outlined text-xl">payments</span>
+                </div>
+                <div className="flex-1 text-left">
+                  <p className="text-sm font-bold">Cash</p>
+                  <p className="text-xs text-slate-400">Pay driver in cash</p>
+                </div>
+                {paymentMethod === 'cash' && <span className="material-symbols-outlined text-primary">check_circle</span>}
+              </button>
+              <button
+                onClick={() => setPaymentMethod('upi')}
+                className={`flex items-center gap-3 p-3 rounded-xl border-2 transition-all ${paymentMethod === 'upi' ? 'border-primary bg-primary/5' : 'border-slate-100 dark:border-slate-700'}`}
+              >
+                <div className={`size-10 rounded-xl flex items-center justify-center ${paymentMethod === 'upi' ? 'bg-primary text-white' : 'bg-slate-100 text-slate-400'}`}>
+                  <span className="material-symbols-outlined text-xl">qr_code_2</span>
+                </div>
+                <div className="flex-1 text-left">
+                  <p className="text-sm font-bold">UPI</p>
+                  <p className="text-xs text-slate-400">Google Pay, PhonePe, Paytm</p>
+                </div>
+                {paymentMethod === 'upi' && <span className="material-symbols-outlined text-primary">check_circle</span>}
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+
       <div className="sticky bottom-0 bg-white dark:bg-surface-dark border-t p-4 pb-10 shadow-lg">
         <button
           onClick={handleConfirmBooking}
@@ -283,7 +381,7 @@ const OrderSummary: React.FC = () => {
             <span className="material-symbols-outlined animate-spin">sync</span>
           ) : (
             <>
-              <span>Confirm Booking</span>
+              <span>Confirm Booking • ₹{fare}</span>
               <span className="material-symbols-outlined">arrow_forward</span>
             </>
           )}

@@ -1,211 +1,131 @@
 /**
- * Jangoes Porter — Fare Calculation Service
- * Market rates calibrated for New Delhi, India (2025)
+ * Jangoes Porter — Fare Calculation Service (V2)
+ * Loads rates from Firestore (admin-configurable), falls back to defaults.
+ * Uses V2 algorithm: Base + Distance + Time (traffic-based) + GST
  */
+
+import { db } from '../src/firebase.ts';
+import { doc, getDoc } from 'firebase/firestore';
+import { calculateFareV2, calculateExchangeFareV2, calculateFinalFare, type VehicleRateV2, type FareBreakdownV2, type FinalFareResult } from './fareCalculator.ts';
+
+export type { VehicleRateV2, FareBreakdownV2, FinalFareResult };
+export { calculateFinalFare };
 
 export interface LatLng {
   lat: number;
   lng: number;
 }
 
-export interface VehicleRate {
-  id:            string;
-  name:          string;
-  baseFare:      number;   // covers first `includedKm` km
-  includedKm:    number;   // km included in base fare
-  perKmRate:     number;   // ₹ per km after included km
-  minFare:       number;   // floor, even for 0.5 km trips
-  freeWaitMins:  number;   // minutes before waiting charges kick in
-  waitPerMin:    number;   // ₹ per minute after free wait
-  capacityKg:    number;   // for weight surcharge logic
-  freeWeightKg:  number;   // kg included free
-  extraKgRate:   number;   // ₹ per kg above free limit
-}
+// ── Default rates (fallback if Firestore is unavailable) ────────────────────
 
-export const VEHICLE_RATES: Record<string, VehicleRate> = {
+const DEFAULT_RATES: Record<string, VehicleRateV2> = {
   'bike': {
-    id:           'bike',
-    name:         'Bike (Two-Wheeler)',
-    baseFare:     60,    // covers first 4 km
-    includedKm:   4,
-    perKmRate:    8,     // ₹8/km after included km
-    minFare:      60,
-    freeWaitMins: 10,    // shorter free wait vs trucks
-    waitPerMin:   2,
-    capacityKg:   20,
-    freeWeightKg: 15,    // up to 15 kg free
-    extraKgRate:  5,     // ₹5/kg above 15 kg
+    id: 'bike', name: 'Bike (Two-Wheeler)',
+    baseFare: 60, includedKm: 4, perKmRate: 8, perMinuteRate: 1.5,
+    minFare: 60, freeWaitMins: 10, waitChargePerMin: 2,
+    capacityKg: 20, freeWeightKg: 15, extraKgRate: 5, gstPercent: 5, active: true,
+  },
+  'car': {
+    id: 'car', name: 'Car (Sedan/Hatchback)',
+    baseFare: 150, includedKm: 4, perKmRate: 14, perMinuteRate: 2.0,
+    minFare: 150, freeWaitMins: 10, waitChargePerMin: 3,
+    capacityKg: 200, freeWeightKg: 50, extraKgRate: 3, gstPercent: 5, active: true,
   },
   'tata-ace': {
-    id:           'tata-ace',
-    name:         'Tata Ace (Mini Truck)',
-    baseFare:     220,
-    includedKm:   4,
-    perKmRate:    22,
-    minFare:      220,
-    freeWaitMins: 15,
-    waitPerMin:   4,
-    capacityKg:   750,
-    freeWeightKg: 500,
-    extraKgRate:  6,
+    id: 'tata-ace', name: 'Tata Ace (Mini Truck)',
+    baseFare: 220, includedKm: 4, perKmRate: 22, perMinuteRate: 2.5,
+    minFare: 220, freeWaitMins: 15, waitChargePerMin: 4,
+    capacityKg: 750, freeWeightKg: 500, extraKgRate: 6, gstPercent: 5, active: true,
   },
   'bolero': {
-    id:           'bolero',
-    name:         'Bolero Pickup',
-    baseFare:     380,
-    includedKm:   4,
-    perKmRate:    28,
-    minFare:      380,
-    freeWaitMins: 15,
-    waitPerMin:   5,
-    capacityKg:   1500,
-    freeWeightKg: 1000,
-    extraKgRate:  6,
+    id: 'bolero', name: 'Bolero Pickup',
+    baseFare: 380, includedKm: 4, perKmRate: 28, perMinuteRate: 3.0,
+    minFare: 380, freeWaitMins: 15, waitChargePerMin: 5,
+    capacityKg: 1500, freeWeightKg: 1000, extraKgRate: 6, gstPercent: 5, active: true,
   },
   'tata-407': {
-    id:           'tata-407',
-    name:         'Tata 407',
-    baseFare:     580,
-    includedKm:   4,
-    perKmRate:    38,
-    minFare:      580,
-    freeWaitMins: 20,
-    waitPerMin:   6,
-    capacityKg:   2500,
-    freeWeightKg: 2000,
-    extraKgRate:  6,
+    id: 'tata-407', name: 'Tata 407',
+    baseFare: 580, includedKm: 4, perKmRate: 38, perMinuteRate: 3.5,
+    minFare: 580, freeWaitMins: 20, waitChargePerMin: 6,
+    capacityKg: 2500, freeWeightKg: 2000, extraKgRate: 6, gstPercent: 5, active: true,
   },
   'large-truck': {
-    id:           'large-truck',
-    name:         'Large Truck (14 ft)',
-    baseFare:     900,
-    includedKm:   4,
-    perKmRate:    55,
-    minFare:      900,
-    freeWaitMins: 20,
-    waitPerMin:   8,
-    capacityKg:   4000,
-    freeWeightKg: 3000,
-    extraKgRate:  6,
+    id: 'large-truck', name: 'Large Truck (14 ft)',
+    baseFare: 900, includedKm: 4, perKmRate: 55, perMinuteRate: 4.0,
+    minFare: 900, freeWaitMins: 20, waitChargePerMin: 8,
+    capacityKg: 4000, freeWeightKg: 3000, extraKgRate: 6, gstPercent: 5, active: true,
   },
 };
 
-export interface FareInput {
-  vehicleId:       string;
-  distanceKm:      number;   // road distance from Distance Matrix API
-  weightKg?:       number;   // actual parcel weight
-  waitingMins?:    number;   // actual waiting time (known at trip end)
-  tollCharges?:    number;   // from route details
-  applyGst?:       boolean;  // default true
+// ── Firestore rate loading with cache ────────────────────────────────────────
+
+let cachedRates: Record<string, VehicleRateV2> | null = null;
+let cacheTimestamp = 0;
+const CACHE_TTL = 5 * 60 * 1000; // 5 minutes
+
+export async function loadVehicleRates(): Promise<Record<string, VehicleRateV2>> {
+  // Return cache if fresh
+  if (cachedRates && Date.now() - cacheTimestamp < CACHE_TTL) {
+    return cachedRates;
+  }
+
+  try {
+    const snap = await getDoc(doc(db, 'config', 'vehicleRates'));
+    if (snap.exists()) {
+      const data = snap.data();
+      cachedRates = data.rates as Record<string, VehicleRateV2>;
+      cacheTimestamp = Date.now();
+      return cachedRates;
+    }
+  } catch (err) {
+    console.warn('[FareService] Failed to load rates from Firestore, using defaults:', err);
+  }
+
+  return DEFAULT_RATES;
 }
 
-export interface FareBreakdown {
-  baseFare:        number;
-  distanceCharge:  number;
-  weightSurcharge: number;
-  nightSurcharge:  number;
-  peakSurcharge:   number;
-  waitingCharge:   number;
-  tollCharges:     number;
-  subtotal:        number;
-  gst:             number;
-  total:           number;
-  surchargeLabel?: string;   // human-readable e.g. "Night +25%"
-  distanceKm:      number;
-  vehicleId?:      string;
-  minFare?:        number;
+/** Get rates synchronously (returns cached or defaults) */
+export function getVehicleRates(): Record<string, VehicleRateV2> {
+  return cachedRates || DEFAULT_RATES;
 }
 
-/** Current surcharge multiplier based on time of day */
-function getTimeSurcharge(date = new Date()): { multiplier: number; label: string } {
-  const hour = date.getHours();
-  const isNight = hour >= 22 || hour < 6;          // 10 PM – 6 AM
-  const isPeak  = (hour >= 8 && hour < 11) || (hour >= 18 && hour < 21); // 8–11 AM, 6–9 PM
+// Keep backward compat export name
+export const VEHICLE_RATES = DEFAULT_RATES;
 
-  if (isNight) return { multiplier: 0.25, label: 'Night +25%' };
-  if (isPeak)  return { multiplier: 0.20, label: 'Peak Hour +20%' };
-  return { multiplier: 0, label: '' };
-}
+// ── V2 Fare Estimation ──────────────────────────────────────────────────────
 
-/** Calculate full fare breakdown */
-export function calculateFare(input: FareInput): FareBreakdown {
-  const rate = VEHICLE_RATES[input.vehicleId];
-  if (!rate) throw new Error(`Unknown vehicle: ${input.vehicleId}`);
-
-  const { distanceKm, weightKg = 0, waitingMins = 0, tollCharges = 0 } = input;
-
-  // 1. Base fare (covers first includedKm km)
-  const baseFare = rate.baseFare;
-
-  // 2. Distance charge (only km beyond the included km)
-  const chargeableKm   = Math.max(0, distanceKm - rate.includedKm);
-  const distanceCharge = Math.round(chargeableKm * rate.perKmRate);
-
-  // 3. Weight surcharge
-  const extraKg        = Math.max(0, weightKg - rate.freeWeightKg);
-  const weightSurcharge = Math.round(extraKg * rate.extraKgRate);
-
-  // 4. Time-based surcharge
-  const { multiplier, label } = getTimeSurcharge();
-  const timeBase       = baseFare + distanceCharge;
-  const timeSurcharge  = Math.round(timeBase * multiplier);
-  const nightSurcharge = label.startsWith('Night') ? timeSurcharge : 0;
-  const peakSurcharge  = label.startsWith('Peak')  ? timeSurcharge : 0;
-
-  // 5. Waiting charge (beyond free minutes)
-  const chargeableWait = Math.max(0, waitingMins - rate.freeWaitMins);
-  const waitingCharge  = Math.round(chargeableWait * rate.waitPerMin);
-
-  // 6. Subtotal before GST
-  const subtotal = Math.max(
-    rate.minFare,
-    baseFare + distanceCharge + weightSurcharge + nightSurcharge + peakSurcharge + waitingCharge + tollCharges,
-  );
-
-  // 7. GST @ 5% (goods transport by road — SAC 9965)
-  const applyGst = input.applyGst !== false;
-  const gst   = applyGst ? Math.round(subtotal * 0.05) : 0;
-  const total = subtotal + gst;
-
-  return {
-    baseFare,
-    distanceCharge,
-    weightSurcharge,
-    nightSurcharge,
-    peakSurcharge,
-    waitingCharge,
-    tollCharges,
-    subtotal,
-    gst,
-    total,
-    surchargeLabel: label || undefined,
-    distanceKm,
-  };
+/**
+ * Calculate fare for a single vehicle using V2 algorithm.
+ * Uses cached Firestore rates if available, otherwise defaults.
+ */
+export function estimateFareV2(
+  vehicleId: string, distanceKm: number, durationMins: number
+): FareBreakdownV2 {
+  const rates = getVehicleRates();
+  const rate = rates[vehicleId] || rates['tata-ace'];
+  return calculateFareV2({ vehicleId, distanceKm, durationMins }, rate);
 }
 
 /**
- * Fetch actual road distance + duration from Google Maps Distance Matrix API.
- * Must be called client-side (uses VITE_ API key).
- * Returns distance in km and duration in minutes.
+ * Calculate exchange fare using V2 algorithm.
  */
-export async function getRoadDistance(
-  origin:      LatLng,
-  destination: LatLng,
-): Promise<{ distanceKm: number; durationMins: number }> {
-  const apiKey = (import.meta as any).env.VITE_GOOGLE_MAPS_API_KEY;
-  const url = `https://maps.googleapis.com/maps/api/distancematrix/json`
-    + `?origins=${origin.lat},${origin.lng}`
-    + `&destinations=${destination.lat},${destination.lng}`
-    + `&mode=driving`
-    + `&region=in`
-    + `&key=${apiKey}`;
+export function estimateExchangeFareV2(
+  vehicleId: string, distanceKm: number, durationMins: number, qcRequired = false
+): FareBreakdownV2 {
+  const rates = getVehicleRates();
+  const rate = rates[vehicleId] || rates['tata-ace'];
+  return calculateExchangeFareV2({ vehicleId, distanceKm, durationMins }, rate);
+}
 
-  // Distance Matrix API has CORS restrictions — must go via server proxy
-  // Use the server-side route instead:
+// ── Road Distance (with traffic-aware duration) ─────────────────────────────
+
+export async function getRoadDistance(
+  origin: LatLng, destination: LatLng
+): Promise<{ distanceKm: number; durationMins: number }> {
   const res = await fetch('/api/distance-matrix', {
-    method:  'POST',
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body:    JSON.stringify({ origin, destination }),
+    body: JSON.stringify({ origin, destination }),
   });
 
   if (!res.ok) throw new Error('Distance Matrix API failed');
@@ -216,30 +136,23 @@ export async function getRoadDistance(
     throw new Error('Could not calculate road distance');
   }
 
+  // Prefer traffic-aware duration if available
+  const durationSecs = element.duration_in_traffic?.value || element.duration.value;
+
   return {
-    distanceKm:   element.distance.value / 1000,          // metres → km
-    durationMins: Math.ceil(element.duration.value / 60), // seconds → mins
+    distanceKm: element.distance.value / 1000,
+    durationMins: Math.ceil(durationSecs / 60),
   };
 }
 
-/** Quick estimate (no API call) using Haversine × road correction factor */
-export function estimateFare(
-  vehicleId:   string,
-  origin:      LatLng,
-  destination: LatLng,
-  weightKg = 0,
-): FareBreakdown {
-  const straightLineKm = haversineKm(origin, destination);
-  const estimatedRoadKm = straightLineKm * 1.4; // Delhi road correction ~1.4×
-  return calculateFare({ vehicleId, distanceKm: estimatedRoadKm, weightKg });
-}
+// ── Haversine fallback ──────────────────────────────────────────────────────
 
-function haversineKm(a: LatLng, b: LatLng): number {
-  const R   = 6371;
+export function haversineKm(a: LatLng, b: LatLng): number {
+  const R = 6371;
   const dLat = toRad(b.lat - a.lat);
   const dLng = toRad(b.lng - a.lng);
-  const h   = Math.sin(dLat / 2) ** 2
-            + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
+  const h = Math.sin(dLat / 2) ** 2
+    + Math.cos(toRad(a.lat)) * Math.cos(toRad(b.lat)) * Math.sin(dLng / 2) ** 2;
   return R * 2 * Math.asin(Math.sqrt(h));
 }
 
@@ -247,37 +160,94 @@ function toRad(deg: number): number {
   return deg * (Math.PI / 180);
 }
 
-/** Exchange fare = roundtrip (1.8x one-way) + QC surcharge if applicable */
-export function calculateExchangeFare(input: FareInput & { qcRequired?: boolean }): FareBreakdown {
-  const oneWay = calculateFare(input);
-  const returnMultiplier = 1.8;
-  const qcSurcharge = input.qcRequired ? 50 : 0;
+// ── Legacy V1 exports (backward compatibility) ──────────────────────────────
+// These are used by existing code that hasn't been updated yet.
 
-  const subtotal = Math.round((oneWay.baseFare + oneWay.distanceCharge + oneWay.weightSurcharge) * returnMultiplier) + qcSurcharge;
-  const { multiplier, label } = getTimeSurcharge();
-  const timeSurcharge = multiplier > 1 ? Math.round(subtotal * (multiplier - 1)) : 0;
-  const subWithTime = subtotal + timeSurcharge;
-  const gst = Math.round(subWithTime * 0.05);
-  const total = subWithTime + gst;
+export interface FareBreakdown {
+  baseFare: number;
+  distanceCharge: number;
+  weightSurcharge: number;
+  nightSurcharge: number;
+  peakSurcharge: number;
+  waitingCharge: number;
+  tollCharges: number;
+  subtotal: number;
+  gst: number;
+  total: number;
+  surchargeLabel?: string;
+  distanceKm: number;
+  vehicleId?: string;
+  minFare?: number;
+  // V2 fields (optional, present when using V2)
+  timeCharge?: number;
+  durationMins?: number;
+  tripFare?: number;
+  estimatedTotal?: number;
+}
 
-  const rate = VEHICLE_RATES[input.vehicleId] || VEHICLE_RATES['tata-ace'];
-  const minFare = Math.round(rate.minFare * returnMultiplier);
+/** V1-compatible calculateFare — delegates to V2 internally */
+export function calculateFare(input: { vehicleId: string; distanceKm: number; weightKg?: number }): FareBreakdown {
+  const rates = getVehicleRates();
+  const rate = rates[input.vehicleId] || rates['tata-ace'];
+  // Estimate duration from distance (avg 25 km/h in Delhi)
+  const estimatedDurationMins = Math.ceil(input.distanceKm / 25 * 60);
+  const v2 = calculateFareV2({ vehicleId: input.vehicleId, distanceKm: input.distanceKm, durationMins: estimatedDurationMins }, rate);
 
   return {
-    baseFare: Math.round(oneWay.baseFare * returnMultiplier),
-    distanceCharge: Math.round(oneWay.distanceCharge * returnMultiplier),
-    weightSurcharge: Math.round(oneWay.weightSurcharge * returnMultiplier) + qcSurcharge,
-    nightSurcharge: label.includes('Night') ? timeSurcharge : 0,
-    peakSurcharge: label.includes('Peak') ? timeSurcharge : 0,
-    surchargeLabel: label || 'Exchange Roundtrip',
+    baseFare: v2.baseFare,
+    distanceCharge: v2.distanceCharge,
+    weightSurcharge: 0,
+    nightSurcharge: 0,
+    peakSurcharge: 0,
     waitingCharge: 0,
     tollCharges: 0,
-    subtotal: subWithTime,
-    gst,
-    total: Math.max(total, minFare),
-    minFare,
-    distanceKm: input.distanceKm,
-    vehicleId: input.vehicleId,
+    subtotal: v2.tripFare,
+    gst: v2.gst,
+    total: v2.estimatedTotal,
+    distanceKm: v2.distanceKm,
+    vehicleId: v2.vehicleId,
+    minFare: v2.minFare,
+    timeCharge: v2.timeCharge,
+    durationMins: v2.durationMins,
+    tripFare: v2.tripFare,
+    estimatedTotal: v2.estimatedTotal,
+  };
+}
+
+/** V1-compatible estimateFare */
+export function estimateFare(
+  vehicleId: string, origin: LatLng, destination: LatLng, weightKg = 0
+): FareBreakdown {
+  const straightLineKm = haversineKm(origin, destination);
+  const estimatedRoadKm = straightLineKm * 1.4;
+  return calculateFare({ vehicleId, distanceKm: estimatedRoadKm, weightKg });
+}
+
+/** V1-compatible exchange fare */
+export function calculateExchangeFare(input: { vehicleId: string; distanceKm: number; qcRequired?: boolean }): FareBreakdown {
+  const rates = getVehicleRates();
+  const rate = rates[input.vehicleId] || rates['tata-ace'];
+  const estimatedDurationMins = Math.ceil(input.distanceKm / 25 * 60);
+  const v2 = calculateExchangeFareV2({ vehicleId: input.vehicleId, distanceKm: input.distanceKm, durationMins: estimatedDurationMins }, rate, input.qcRequired);
+
+  return {
+    baseFare: v2.baseFare,
+    distanceCharge: v2.distanceCharge,
+    weightSurcharge: 0,
+    nightSurcharge: 0,
+    peakSurcharge: 0,
+    waitingCharge: 0,
+    tollCharges: 0,
+    subtotal: v2.tripFare,
+    gst: v2.gst,
+    total: v2.estimatedTotal,
+    surchargeLabel: 'Exchange Roundtrip',
+    distanceKm: v2.distanceKm,
+    vehicleId: v2.vehicleId,
+    minFare: v2.minFare,
+    timeCharge: v2.timeCharge,
+    tripFare: v2.tripFare,
+    estimatedTotal: v2.estimatedTotal,
   };
 }
 
@@ -286,5 +256,5 @@ export function estimateExchangeFare(
 ): FareBreakdown {
   const straightLineKm = haversineKm(origin, destination);
   const estimatedRoadKm = straightLineKm * 1.4;
-  return calculateExchangeFare({ vehicleId, distanceKm: estimatedRoadKm, weightKg, qcRequired });
+  return calculateExchangeFare({ vehicleId, distanceKm: estimatedRoadKm, qcRequired });
 }

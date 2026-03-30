@@ -30,8 +30,10 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin }) => {
     const userDocRef = doc(db, 'users', uid);
     const userDoc = await getDoc(userDocRef);
     if (!userDoc.exists()) {
+      // New user — create with selected role
       await setDoc(userDocRef, {
         role,
+        roles: [role],
         kycCompleted: false,
         createdAt: new Date().toISOString(),
         walletBalance: 0,
@@ -39,7 +41,14 @@ const AuthScreen: React.FC<AuthScreenProps> = ({ onLogin }) => {
       });
       return role;
     }
-    return userDoc.data().role as UserRole;
+    const data = userDoc.data();
+    const existingRoles: string[] = data.roles || [data.role];
+    // If user is logging in with a role they don't have yet, add it
+    if (!existingRoles.includes(role)) {
+      await setDoc(userDocRef, { roles: [...existingRoles, role] }, { merge: true });
+    }
+    // Return the role user selected on login screen (not the stored one)
+    return role;
   };
 
   const handleGoogleLogin = async () => {
