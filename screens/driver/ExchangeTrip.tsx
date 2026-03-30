@@ -22,6 +22,7 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
   const [returnOtpInput, setReturnOtpInput] = useState('');
   const [qcRemarks, setQcRemarks] = useState('');
   const [qcPhotos, setQcPhotos] = useState<string[]>([]);
+  const [qcChecked, setQcChecked] = useState<Record<number, boolean>>({});
   const [productBAvailable, setProductBAvailable] = useState<boolean | null>(null);
 
   const imageInputRef = useRef<HTMLInputElement>(null);
@@ -228,24 +229,13 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
             <p className="text-[10px] font-black text-blue-600 uppercase mb-1">Hand over Product A to receiver</p>
             <p className="text-sm font-medium">{exchange?.productA?.description || 'Item'}</p>
           </div>
-          <div className="flex flex-col gap-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Enter Handover OTP (from receiver)</label>
-            <input type="text" maxLength={4} value={handoverOtpInput} onChange={e => setHandoverOtpInput(e.target.value)}
-              className="w-full h-14 bg-white border-2 border-slate-100 rounded-2xl px-5 text-center text-2xl font-black tracking-[0.5em] focus:border-primary" placeholder="----" />
-          </div>
           <p className="text-sm text-slate-600 font-medium text-center">Is Product B available for collection?</p>
           <div className="flex gap-3">
-            <button onClick={() => {
-              if (!exchange?.productAHandoverOtp || handoverOtpInput !== exchange.productAHandoverOtp) { alert('Invalid Handover OTP'); return; }
-              setProductBAvailable(true); update(BookingStatus.PICKING_UP_PRODUCT_B);
-            }} disabled={loading}
+            <button onClick={() => { setProductBAvailable(true); update(BookingStatus.PICKING_UP_PRODUCT_B); }} disabled={loading}
               className="flex-1 h-14 bg-green-600 text-white font-black rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50">
               <span className="material-symbols-outlined">check</span>Yes, Available
             </button>
-            <button onClick={() => {
-              if (!exchange?.productAHandoverOtp || handoverOtpInput !== exchange.productAHandoverOtp) { alert('Invalid Handover OTP'); return; }
-              setProductBAvailable(false); update(BookingStatus.RETURNING_PRODUCT_A, { 'exchange.failureReason': 'product_b_unavailable' });
-            }} disabled={loading}
+            <button onClick={() => { setProductBAvailable(false); update(BookingStatus.RETURNING_PRODUCT_A, { 'exchange.failureReason': 'product_b_unavailable' }); }} disabled={loading}
               className="flex-1 h-14 bg-red-500 text-white font-black rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50">
               <span className="material-symbols-outlined">close</span>Not Available
             </button>
@@ -278,9 +268,47 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
           </div>
           {exchange?.qcRequired ? (
             <>
+              {/* QC Checklist — driver must check all items */}
+              {(exchange as any).qcItems?.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] font-black text-amber-600 uppercase tracking-widest ml-1">QC Checklist — Verify Each Item</label>
+                  <div className="flex flex-col gap-2">
+                    {((exchange as any).qcItems as string[]).map((item: string, i: number) => (
+                      <button key={i} onClick={() => setQcChecked(prev => ({ ...prev, [i]: !prev[i] }))}
+                        className={`flex items-center gap-3 p-3 rounded-2xl border-2 transition-all text-left ${
+                          qcChecked[i]
+                            ? 'border-green-500 bg-green-50 dark:bg-green-900/20'
+                            : 'border-slate-200 dark:border-slate-700 bg-white dark:bg-slate-900'
+                        }`}>
+                        <div className={`size-7 rounded-lg flex items-center justify-center shrink-0 transition-all ${
+                          qcChecked[i] ? 'bg-green-500 text-white' : 'bg-slate-100 dark:bg-slate-800 text-slate-300'
+                        }`}>
+                          <span className="material-symbols-outlined text-lg">{qcChecked[i] ? 'check' : 'check_box_outline_blank'}</span>
+                        </div>
+                        <span className={`text-sm font-medium ${qcChecked[i] ? 'text-green-700 dark:text-green-300 line-through' : 'text-slate-700 dark:text-slate-200'}`}>{item}</span>
+                      </button>
+                    ))}
+                  </div>
+                  {(() => {
+                    const total = ((exchange as any).qcItems as string[]).length;
+                    const checked = Object.values(qcChecked).filter(Boolean).length;
+                    return (
+                      <div className="flex items-center justify-between px-1 mt-1">
+                        <span className="text-[10px] font-bold text-slate-400">{checked} of {total} verified</span>
+                        <div className="flex gap-1">
+                          {Array.from({ length: total }).map((_, i) => (
+                            <div key={i} className={`h-1.5 w-6 rounded-full transition-colors ${qcChecked[i] ? 'bg-green-500' : 'bg-slate-200'}`} />
+                          ))}
+                        </div>
+                      </div>
+                    );
+                  })()}
+                </div>
+              )}
+
               <div className="flex flex-col gap-2">
-                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">QC Remarks</label>
-                <textarea value={qcRemarks} onChange={e => setQcRemarks(e.target.value)} rows={3} placeholder="Describe the condition of Product B..."
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">QC Remarks (optional)</label>
+                <textarea value={qcRemarks} onChange={e => setQcRemarks(e.target.value)} rows={2} placeholder="Any additional observations..."
                   className="w-full bg-white border-2 border-slate-100 rounded-2xl px-4 py-3 text-sm focus:border-primary" />
               </div>
               <div className="flex flex-col gap-2">
@@ -296,9 +324,14 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
               </div>
               <button onClick={() => {
                 if (!productBImage) { alert('Please capture Product B photo'); return; }
+                // Verify all QC checklist items are checked
+                const qcItemsList = (exchange as any).qcItems || [];
+                const allChecked = qcItemsList.length === 0 || qcItemsList.every((_: string, i: number) => qcChecked[i]);
+                if (!allChecked) { alert('Please verify all QC checklist items before submitting.'); return; }
+                const checkedItems = qcItemsList.map((label: string, i: number) => ({ label, passed: !!qcChecked[i] }));
                 update(BookingStatus.QC_PENDING, {
                   'exchange.productB.images': [productBImage],
-                  'exchange.qcChecklist': { items: [], remarks: qcRemarks, photos: qcPhotos, submittedAt: new Date().toISOString() },
+                  'exchange.qcChecklist': { items: checkedItems, remarks: qcRemarks, photos: qcPhotos, submittedAt: new Date().toISOString() },
                 });
               }} disabled={loading}
                 className="w-full h-14 bg-amber-500 text-white font-black rounded-2xl shadow-lg flex items-center justify-center gap-2 disabled:opacity-50">

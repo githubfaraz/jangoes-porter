@@ -41,6 +41,7 @@ const DriverDashboard: React.FC = () => {
   const [isDriverDisabled, setIsDriverDisabled] = useState(false);
   const [driverLat, setDriverLat] = useState<number | null>(null);
   const [driverLng, setDriverLng] = useState<number | null>(null);
+  const declinedTripsRef = useRef<Set<string>>(new Set());
   const [locationGranted, setLocationGranted] = useState(false);
   const [showLocationPrompt, setShowLocationPrompt] = useState(false);
   const geoWatchRef = useRef<number | null>(null);
@@ -136,8 +137,11 @@ const DriverDashboard: React.FC = () => {
     const q = query(collection(db, 'trips'), where('status', '==', BookingStatus.SEARCHING));
     const unsubscribe = onSnapshot(q, (snapshot) => {
       if (!snapshot.empty) {
-        // Find first trip matching vehicle category AND within radius
+        // Find first trip matching vehicle category, within radius, and not declined
         const match = snapshot.docs.find(d => {
+          // Skip declined trips
+          if (declinedTripsRef.current.has(d.id)) return false;
+
           const tripData = d.data();
           const tripVehicleId = tripData.vehicleId || '';
 
@@ -474,7 +478,11 @@ const DriverDashboard: React.FC = () => {
 
               <div className="flex gap-4">
                 <button
-                  onClick={() => setShowRequest(false)}
+                  onClick={() => {
+                    if (currentRequest?.id) declinedTripsRef.current.add(currentRequest.id);
+                    setShowRequest(false);
+                    setCurrentRequest(null);
+                  }}
                   className="flex-1 h-16 bg-slate-50 dark:bg-slate-800 text-slate-500 font-black rounded-2xl text-[10px] uppercase tracking-widest active:scale-95 transition-all"
                 >
                   Decline

@@ -12,8 +12,10 @@ const ExchangeDetails: React.FC = () => {
   const [productA, setProductA] = useState({ description: '', category: '' });
   const [productB, setProductB] = useState({ description: '', category: '' });
   const [qcRequired, setQcRequired] = useState(false);
-  const [qcInstructions, setQcInstructions] = useState('');
+  const [qcItems, setQcItems] = useState<string[]>([]);
+  const [newQcItem, setNewQcItem] = useState('');
   const [weight, setWeight] = useState('');
+  const [weightUnit, setWeightUnit] = useState<'g' | 'kg'>('g');
   const [productAPhotos, setProductAPhotos] = useState<string[]>([]);
   const [productBPhotos, setProductBPhotos] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -43,8 +45,8 @@ const ExchangeDetails: React.FC = () => {
       state: {
         ...bookingState,
         serviceType: 'exchange',
-        exchange: { productA, productB, qcRequired, qcInstructions: qcRequired ? qcInstructions : '', productAPhotos, productBPhotos },
-        dimensions: { chargeableWeight: parseFloat(weight), estimatedCost: 0 },
+        exchange: { productA, productB, qcRequired, qcItems: qcRequired ? qcItems : [], productAPhotos, productBPhotos },
+        dimensions: { chargeableWeight: weightUnit === 'g' ? parseFloat(weight) / 1000 : parseFloat(weight), estimatedCost: 0 },
       },
     });
   };
@@ -223,17 +225,67 @@ const ExchangeDetails: React.FC = () => {
           </div>
 
           {qcRequired && (
-            <div className="flex flex-col gap-2 animate-in fade-in slide-in-from-top-2 duration-300">
-              <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest ml-1">QC Instructions</span>
-              <textarea
-                value={qcInstructions}
-                onChange={(e) => setQcInstructions(e.target.value)}
-                className="w-full h-28 bg-white dark:bg-slate-900 border-2 border-amber-200 dark:border-amber-900/30 rounded-3xl p-5 text-base font-medium focus:ring-amber-500/20 focus:border-amber-500 transition-all resize-none shadow-sm placeholder:text-slate-300 dark:placeholder:text-slate-600"
-                placeholder="e.g., Check if screen is cracked, verify serial number matches, ensure all accessories are included..."
-              />
-              <p className="text-[9px] text-slate-400 font-medium ml-1 flex items-center gap-1">
+            <div className="flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
+              <span className="text-[9px] font-black text-amber-600 uppercase tracking-widest ml-1">QC Checklist</span>
+              <p className="text-xs text-slate-400 font-medium ml-1">Add items the driver must verify before accepting Product B.</p>
+
+              {/* Existing QC items */}
+              {qcItems.length > 0 && (
+                <div className="flex flex-col gap-2">
+                  {qcItems.map((item, i) => (
+                    <div key={i} className="flex items-center gap-3 bg-amber-50 dark:bg-amber-900/10 border border-amber-200/60 dark:border-amber-800/40 rounded-2xl px-4 py-3">
+                      <div className="size-6 rounded-lg bg-amber-500/20 flex items-center justify-center shrink-0">
+                        <span className="material-symbols-outlined text-amber-600 text-sm">checklist</span>
+                      </div>
+                      <span className="text-sm font-medium text-slate-800 dark:text-slate-200 flex-1">{item}</span>
+                      <button onClick={() => setQcItems(prev => prev.filter((_, idx) => idx !== i))}
+                        className="size-7 rounded-full bg-red-100 text-red-500 flex items-center justify-center shrink-0 hover:bg-red-200 transition-colors">
+                        <span className="material-symbols-outlined text-sm">close</span>
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {/* Add new instruction */}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newQcItem}
+                  onChange={e => setNewQcItem(e.target.value)}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter' && newQcItem.trim().length > 2) {
+                      setQcItems(prev => [...prev, newQcItem.trim()]);
+                      setNewQcItem('');
+                    }
+                  }}
+                  placeholder="e.g. Check if screen is cracked"
+                  className="flex-1 bg-white dark:bg-slate-900 border-2 border-slate-200 dark:border-slate-700 rounded-xl px-4 py-3 text-sm font-medium focus:border-amber-500 focus:ring-amber-500/20 transition-all placeholder:text-slate-300"
+                />
+                <button
+                  onClick={() => {
+                    if (newQcItem.trim().length > 2) {
+                      setQcItems(prev => [...prev, newQcItem.trim()]);
+                      setNewQcItem('');
+                    }
+                  }}
+                  disabled={newQcItem.trim().length <= 2}
+                  className="size-12 bg-amber-500 text-white rounded-xl flex items-center justify-center shrink-0 disabled:opacity-30 active:scale-95 transition-all shadow-md shadow-amber-500/20"
+                >
+                  <span className="material-symbols-outlined text-xl">add</span>
+                </button>
+              </div>
+
+              {qcItems.length === 0 && (
+                <div className="bg-slate-50 dark:bg-slate-900 rounded-2xl p-4 flex items-center gap-3">
+                  <span className="material-symbols-outlined text-slate-300 text-xl">playlist_add</span>
+                  <p className="text-xs text-slate-400">No checklist items yet. Add at least one instruction for the driver.</p>
+                </div>
+              )}
+
+              <p className="text-[9px] text-amber-500 font-bold ml-1 flex items-center gap-1">
                 <span className="material-symbols-outlined text-xs">info</span>
-                The driver will follow these instructions before completing the exchange.
+                Driver must check all items before collecting Product B.
               </p>
             </div>
           )}
@@ -241,11 +293,23 @@ const ExchangeDetails: React.FC = () => {
 
         {/* Estimated Weight */}
         <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 border border-slate-100 dark:border-slate-700 shadow-sm flex flex-col gap-4">
-          <div className="flex items-center gap-2">
-            <div className="size-6 bg-primary/10 rounded-lg flex items-center justify-center">
-              <span className="material-symbols-outlined text-primary text-sm filled">scale</span>
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <div className="size-6 bg-primary/10 rounded-lg flex items-center justify-center">
+                <span className="material-symbols-outlined text-primary text-sm filled">scale</span>
+              </div>
+              <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Estimated Weight</h3>
             </div>
-            <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Estimated Weight</h3>
+            <div className="flex bg-slate-100 dark:bg-slate-700 rounded-xl p-1">
+              <button onClick={() => setWeightUnit('g')}
+                className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${weightUnit === 'g' ? 'bg-white dark:bg-slate-600 shadow-sm text-primary' : 'text-slate-400'}`}>
+                Grams
+              </button>
+              <button onClick={() => setWeightUnit('kg')}
+                className={`px-3 py-1.5 rounded-lg text-[10px] font-black uppercase tracking-widest transition-all ${weightUnit === 'kg' ? 'bg-white dark:bg-slate-600 shadow-sm text-primary' : 'text-slate-400'}`}>
+                KG
+              </button>
+            </div>
           </div>
 
           <div className="relative">
@@ -255,11 +319,11 @@ const ExchangeDetails: React.FC = () => {
               value={weight}
               onChange={(e) => setWeight(e.target.value)}
               min="0.1"
-              step="0.1"
-              className="w-full bg-white dark:bg-slate-900 border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-5 py-4 text-base font-bold focus:ring-primary/20 focus:border-primary transition-all shadow-sm placeholder:text-slate-300 dark:placeholder:text-slate-600 pr-14"
-              placeholder="0.0"
+              step={weightUnit === 'g' ? '10' : '0.1'}
+              className="w-full bg-white dark:bg-slate-900 border-2 border-slate-100 dark:border-slate-700 rounded-2xl px-5 py-4 text-base font-bold focus:ring-primary/20 focus:border-primary transition-all shadow-sm placeholder:text-slate-300 dark:placeholder:text-slate-600 pr-16"
+              placeholder={weightUnit === 'g' ? '500' : '0.5'}
             />
-            <span className="absolute right-5 top-1/2 -translate-y-1/2 text-sm font-black text-slate-400">KG</span>
+            <span className="absolute right-5 top-1/2 -translate-y-1/2 text-sm font-black text-slate-400 uppercase">{weightUnit}</span>
           </div>
 
           <p className="text-[9px] text-slate-400 font-medium ml-1 flex items-center gap-1">

@@ -111,7 +111,7 @@ const OrderSummary: React.FC = () => {
             referencePhotos: exchangeData.productBPhotos || [],
           },
           qcRequired: exchangeData.qcRequired || false,
-          qcInstructions: exchangeData.qcInstructions || '',
+          qcItems: exchangeData.qcItems || [],
           returnOtp: returnOtpRef.current,
           productBPickupOtp: productBPickupOtpRef.current,
           productAHandoverOtp: productAHandoverOtpRef.current,

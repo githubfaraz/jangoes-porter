@@ -458,20 +458,6 @@ const Tracking: React.FC = () => {
                 );
               }
 
-              // Exchange: show handover OTP when driver is heading to or at receiver
-              const isHandoverStage = [BookingStatus.IN_TRANSIT, BookingStatus.ARRIVED_AT_RECEIVER].includes(trip?.status as BookingStatus);
-              if (isExchange && isHandoverStage) {
-                return (
-                  <div className="mt-6 bg-rose-50 dark:bg-rose-900/10 rounded-xl p-4 flex items-center justify-between">
-                    <div className="flex flex-col">
-                      <span className="text-[10px] uppercase font-bold text-rose-600 tracking-widest mb-1">Handover OTP (share with receiver)</span>
-                      <span className="text-2xl font-bold tracking-[0.2em] font-mono dark:text-white">{trip?.exchange?.productAHandoverOtp || '----'}</span>
-                    </div>
-                    <span className="material-symbols-outlined text-rose-500 text-3xl">swap_horiz</span>
-                  </div>
-                );
-              }
-
               // Default: show pickup OTP
               return (
                 <div className="mt-6 bg-blue-50 dark:bg-primary/10 rounded-xl p-4 flex items-center justify-between">
