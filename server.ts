@@ -161,6 +161,45 @@ app.post('/api/distance-matrix', async (req, res) => {
 });
 // ─────────────────────────────────────────────────────────────────────────────
 
+// ─── Send Delivery OTP to Receiver ──────────────────────────────────────────
+app.post('/api/send-delivery-otp', async (req, res) => {
+  const { receiverPhone, otp, senderName } = req.body;
+  if (!receiverPhone || !otp) return res.status(400).json({ error: 'Missing fields' });
+
+  // Clean phone number
+  const phone = receiverPhone.replace(/[^0-9]/g, '').slice(-10);
+  if (phone.length !== 10) return res.json({ success: true, demo: true }); // skip if invalid
+
+  const smsUkey = (process.env.SMS_UKEY || "").replace(/^"(.*)"$/, '$1').trim();
+  const smsSender = (process.env.SMS_SENDER || "").replace(/^"(.*)"$/, '$1').trim();
+
+  if (!smsUkey || !smsSender) {
+    console.log(`[DEMO] Delivery OTP for ${phone}: ${otp}`);
+    return res.json({ success: true, demo: true, otp });
+  }
+
+  try {
+    const message = `Your delivery OTP is ${otp}. Share this with the driver to receive your parcel from ${senderName || 'Jangoes Porter'}. Do not share with anyone else.`;
+    // Use the same SMS API
+    const payload = {
+      filetype: 1, language: 0, credittype: 7,
+      senderid: smsSender,
+      message,
+      number: phone,
+    };
+    const smsRes = await axios.get('https://www.voicensms.in/api/sms-api.php', {
+      params: { ...payload, ukey: smsUkey },
+      timeout: 8000,
+    });
+    console.log(`[SMS] Delivery OTP sent to ${phone}:`, smsRes.data);
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('[SMS] Delivery OTP failed:', err.message);
+    console.log(`[DEMO] Delivery OTP for ${phone}: ${otp}`);
+    res.json({ success: true, demo: true, otp });
+  }
+});
+
 // ─── Driver Info Endpoint (for customer tracking screen) ─────────────────────
 app.get('/api/driver-info/:driverId', async (req, res) => {
   try {

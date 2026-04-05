@@ -179,6 +179,14 @@ const ActiveTrip: React.FC = () => {
       return;
     }
     updateTripStatus(BookingStatus.IN_TRANSIT, { parcelImageUrl: parcelImage, tripStartedAt: new Date().toISOString() });
+    // Send delivery OTP to receiver via SMS
+    if (trip?.receiverPhone && trip?.dropoffOtp) {
+      fetch('/api/send-delivery-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ receiverPhone: trip.receiverPhone, otp: trip.dropoffOtp, senderName: trip.senderName }),
+      }).catch(() => {});
+    }
   };
 
   const handleArrivedAtDestination = () => {
@@ -547,6 +555,18 @@ const ActiveTrip: React.FC = () => {
                   <p className="text-xs font-bold text-green-600 uppercase tracking-widest">Ready to Deliver</p>
                 </div>
 
+                {/* Parcel verification — show picked up product details + image */}
+                <div className="bg-slate-50 dark:bg-slate-800 rounded-2xl p-3">
+                  <p className="text-[9px] font-black text-slate-400 uppercase tracking-widest mb-2">Verify Parcel Before Delivery</p>
+                  {trip?.parcelImageUrl && (
+                    <img src={trip.parcelImageUrl} alt="Parcel" className="w-full h-32 rounded-xl object-cover border border-slate-200 mb-2" />
+                  )}
+                  <div className="flex flex-col gap-1 text-xs">
+                    {(trip as any)?.parcelCategory && <p className="text-slate-500">Category: <span className="font-semibold text-slate-700 dark:text-slate-200">{(trip as any).parcelCategory}</span></p>}
+                    {(trip as any)?.parcelWeight > 0 && <p className="text-slate-500">Weight: <span className="font-semibold text-slate-700 dark:text-slate-200">{(trip as any).parcelWeight} kg</span></p>}
+                  </div>
+                </div>
+
                 <div className="flex items-center gap-4">
                   <div className="size-10 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center shrink-0">
                     <span className="material-symbols-outlined text-slate-400">person</span>
@@ -562,8 +582,25 @@ const ActiveTrip: React.FC = () => {
                   )}
                 </div>
 
+                {/* Delivery OTP from receiver */}
+                <div className="flex flex-col gap-2">
+                  <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Enter Delivery OTP (from receiver)</label>
+                  <input
+                    type="text"
+                    maxLength={4}
+                    value={dropoffOtpInput}
+                    onChange={(e) => setDropoffOtpInput(e.target.value)}
+                    className="w-full h-14 bg-white dark:bg-slate-900 border-2 border-slate-100 dark:border-slate-800 rounded-2xl px-5 text-center text-2xl font-black tracking-[0.5em] focus:border-primary transition-all"
+                    placeholder="----"
+                  />
+                  <p className="text-[9px] text-slate-400 ml-1">Receiver has received this OTP via SMS</p>
+                </div>
+
                 <button
-                  onClick={handleCompleteTrip}
+                  onClick={() => {
+                    if (dropoffOtpInput !== trip?.dropoffOtp) { alert('Invalid OTP. Ask the receiver for the correct OTP sent to their phone.'); return; }
+                    handleCompleteTrip();
+                  }}
                   className="w-full h-16 bg-primary text-white font-black rounded-2xl shadow-xl shadow-primary/30 flex items-center justify-center gap-2"
                 >
                   <span className="material-symbols-outlined">verified</span>

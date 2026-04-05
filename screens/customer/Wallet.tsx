@@ -8,6 +8,7 @@ interface Transaction {
   amount: number;
   type: 'credit' | 'debit';
   description: string;
+  tripId?: string;
   createdAt: Timestamp | null;
 }
 
@@ -24,223 +25,166 @@ const CustomerWallet: React.FC = () => {
 
   const uid = auth.currentUser?.uid;
 
-  // Real-time balance listener
   useEffect(() => {
     if (!uid) return;
     const unsub = onSnapshot(doc(db, 'users', uid), (snap) => {
-      if (snap.exists()) {
-        setBalance(snap.data().walletBalance ?? 0);
-      }
+      if (snap.exists()) setBalance(snap.data().walletBalance ?? 0);
     });
     return () => unsub();
   }, [uid]);
 
-  // Fetch recent transactions
   const fetchTransactions = async () => {
     if (!uid) return;
     setLoadingTx(true);
     try {
-      const txRef = collection(db, 'users', uid, 'transactions');
-      const q = query(txRef, orderBy('createdAt', 'desc'), limit(20));
+      const q = query(collection(db, 'users', uid, 'transactions'), orderBy('createdAt', 'desc'), limit(50));
       const snap = await getDocs(q);
-      const txs: Transaction[] = snap.docs.map(d => ({
-        id: d.id,
-        ...(d.data() as Omit<Transaction, 'id'>),
-      }));
-      setTransactions(txs);
-    } catch (err) {
-      console.error('Failed to fetch transactions:', err);
-    } finally {
-      setLoadingTx(false);
-    }
+      setTransactions(snap.docs.map(d => ({ id: d.id, ...(d.data() as Omit<Transaction, 'id'>) })));
+    } catch (err) { console.error('Fetch tx error:', err); }
+    finally { setLoadingTx(false); }
   };
 
-  useEffect(() => {
-    fetchTransactions();
-  }, [uid]);
+  useEffect(() => { fetchTransactions(); }, [uid]);
 
   const handleAddMoney = async () => {
     const amount = parseFloat(addAmount);
     if (isNaN(amount) || amount <= 0 || !uid) return;
-
-    setIsProcessing(true);
-    setError('');
-
+    setIsProcessing(true); setError('');
     try {
-      // Update wallet balance with atomic increment
-      const userRef = doc(db, 'users', uid);
-      await updateDoc(userRef, { walletBalance: increment(amount) });
-
-      // Save transaction record
-      const txRef = collection(db, 'users', uid, 'transactions');
-      await addDoc(txRef, {
-        amount,
-        type: 'credit',
-        description: 'Wallet Top-up',
-        createdAt: serverTimestamp(),
+      await updateDoc(doc(db, 'users', uid), { walletBalance: increment(amount) });
+      await addDoc(collection(db, 'users', uid, 'transactions'), {
+        amount, type: 'credit', description: 'Wallet Top-up', createdAt: serverTimestamp(),
       });
-
-      setIsProcessing(false);
-      setIsSuccess(true);
-
-      // Refresh transactions list
+      setIsProcessing(false); setIsSuccess(true);
       await fetchTransactions();
-
-      setTimeout(() => {
-        setIsSuccess(false);
-        setShowAddModal(false);
-        setAddAmount('');
-      }, 2000);
+      setTimeout(() => { setIsSuccess(false); setShowAddModal(false); setAddAmount(''); }, 2000);
     } catch (err: any) {
-      console.error('Add money failed:', err);
-      setIsProcessing(false);
-      setError('Something went wrong. Please try again.');
+      setIsProcessing(false); setError('Something went wrong. Please try again.');
     }
   };
 
-  const quickAmounts = [100, 500, 1000, 2000];
+  // Group transactions by date
+  const groupedTx = transactions.reduce<Record<string, Transaction[]>>((groups, tx) => {
+    const dateStr = tx.createdAt
+      ? tx.createdAt.toDate().toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' })
+      : 'Unknown';
+    if (!groups[dateStr]) groups[dateStr] = [];
+    groups[dateStr].push(tx);
+    return groups;
+  }, {});
 
-  const formatDate = (ts: Timestamp | null) => {
+  const formatTime = (ts: Timestamp | null) => {
     if (!ts) return '';
-    const d = ts.toDate();
-    return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric' }) +
-      ' · ' +
-      d.toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+    return ts.toDate().toLocaleTimeString('en-IN', { hour: '2-digit', minute: '2-digit' });
+  };
+
+  const formatRefDate = (ts: Timestamp | null) => {
+    if (!ts) return '';
+    return ts.toDate().toLocaleDateString('en-IN', { month: 'short', day: 'numeric', year: 'numeric' });
   };
 
   return (
-    <div className="flex flex-col h-full bg-background-light dark:bg-background-dark relative">
-      <header className="flex items-center px-4 py-3 justify-between sticky top-0 z-10 bg-white/95 dark:bg-background-dark/95 backdrop-blur-sm">
-        <div className="flex items-center gap-3">
-          <button onClick={() => navigate(-1)} className="p-2 rounded-full hover:bg-slate-100">
-            <span className="material-symbols-outlined">arrow_back</span>
-          </button>
-          <h2 className="text-xl font-bold">My Wallet</h2>
-        </div>
-        <button onClick={() => navigate('/help')} className="p-2 rounded-full hover:bg-slate-100">
-          <span className="material-symbols-outlined">help_outline</span>
+    <div className="flex flex-col h-full bg-white dark:bg-slate-950">
+      {/* Header */}
+      <header className="flex items-center px-4 py-3 sticky top-0 z-10 bg-white dark:bg-slate-950">
+        <button onClick={() => navigate(-1)} className="p-2 rounded-full hover:bg-slate-100 dark:hover:bg-slate-800">
+          <span className="material-symbols-outlined">arrow_back</span>
         </button>
       </header>
 
-      <main className="flex-1 overflow-y-auto pb-28 px-4 no-scrollbar">
-        <div className="py-4">
-          <div className="relative w-full rounded-2xl bg-gradient-to-br from-[#0052cc] to-[#003d99] shadow-lg p-6 text-white overflow-hidden">
-            <div className="relative z-10 flex flex-col justify-between gap-8">
-              <div className="flex justify-between items-start">
-                <div>
-                  <p className="text-blue-100 text-sm font-medium mb-1">Total Balance</p>
-                  <h1 className="text-4xl font-bold tracking-tight">
-                    {balance === null ? (
-                      <span className="inline-block w-32 h-10 bg-white/20 rounded-lg animate-pulse"></span>
-                    ) : (
-                      `₹${balance.toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`
-                    )}
-                  </h1>
-                </div>
-                <div className="bg-white/20 backdrop-blur-md px-3 py-1 rounded-full text-xs font-semibold">ACTIVE</div>
-              </div>
-              <button
-                onClick={() => setShowAddModal(true)}
-                className="bg-white text-primary font-bold py-3 rounded-xl shadow-sm flex items-center justify-center gap-2 active:scale-[0.98] transition-transform"
-              >
-                <span className="material-symbols-outlined text-lg">add</span>
-                Add Money
-              </button>
+      <main className="flex-1 overflow-y-auto pb-28 no-scrollbar">
+        {/* Balance Section */}
+        <div className="flex flex-col items-center pt-4 pb-8 px-6">
+          <p className="text-sm font-semibold text-slate-500 mb-3">Jangoes Credits Balance</p>
+          <div className="flex items-center gap-3 mb-6">
+            <div className="size-10 bg-primary rounded-xl flex items-center justify-center">
+              <span className="material-symbols-outlined text-white text-xl">account_balance_wallet</span>
             </div>
-            {/* Background design elements */}
-            <div className="absolute top-0 right-0 w-32 h-32 bg-white/10 rounded-full -translate-y-1/2 translate-x-1/2"></div>
-            <div className="absolute bottom-0 left-0 w-24 h-24 bg-white/5 rounded-full translate-y-1/2 -translate-x-1/2"></div>
+            <h1 className="text-4xl font-black text-slate-900 dark:text-white">
+              {balance === null ? (
+                <span className="inline-block w-24 h-10 bg-slate-100 dark:bg-slate-800 rounded-lg animate-pulse"></span>
+              ) : (
+                `₹${Math.max(0, balance).toLocaleString('en-IN')}`
+              )}
+            </h1>
           </div>
+          <button
+            onClick={() => setShowAddModal(true)}
+            className="w-full max-w-sm h-14 bg-primary text-white font-black rounded-2xl flex items-center justify-center gap-2 shadow-lg shadow-primary/20 active:scale-[0.98] transition-transform text-lg"
+          >
+            Add Money
+          </button>
         </div>
 
-        <div className="grid grid-cols-4 gap-4 mb-8">
-          {[
-            { icon: 'add_card', label: 'Top Up', action: () => setShowAddModal(true) },
-            { icon: 'send', label: 'Send', action: () => {} },
-            { icon: 'request_quote', label: 'Request', action: () => {} },
-            { icon: 'more_horiz', label: 'More', action: () => {} },
-          ].map(action => (
-            <button key={action.label} onClick={action.action} className="flex flex-col items-center gap-2 group">
-              <div className="w-14 h-14 rounded-xl bg-white dark:bg-surface-dark flex items-center justify-center shadow-sm text-primary group-active:scale-95 transition-transform">
-                <span className="material-symbols-outlined text-2xl">{action.icon}</span>
-              </div>
-              <span className="text-[10px] font-medium text-slate-500">{action.label}</span>
-            </button>
-          ))}
-        </div>
-
-        <div className="mb-6">
-          <h3 className="text-lg font-bold mb-3">Saved Payment Methods</h3>
-          <div className="flex gap-4 overflow-x-auto no-scrollbar pb-2">
-            <div className="min-w-[280px] bg-white dark:bg-surface-dark p-4 rounded-xl border border-slate-100 dark:border-slate-800 flex items-center gap-4 shadow-sm">
-              <div className="w-12 h-12 rounded-lg bg-blue-50 dark:bg-primary/10 flex items-center justify-center text-primary">
-                <span className="material-symbols-outlined">credit_card</span>
-              </div>
-              <div className="flex-1">
-                <p className="font-bold text-sm">Visa •••• 4242</p>
-                <p className="text-xs text-slate-500">Expires 12/25</p>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        <div>
-          <h3 className="text-lg font-bold mb-3">Recent Transactions</h3>
-          <div className="flex flex-col gap-3">
-            {loadingTx ? (
-              // Skeleton loaders
-              [...Array(3)].map((_, i) => (
-                <div key={i} className="bg-white dark:bg-surface-dark p-4 rounded-xl flex items-center justify-between border border-slate-100 dark:border-slate-800 shadow-sm animate-pulse">
-                  <div className="flex items-center gap-3">
-                    <div className="w-10 h-10 rounded-full bg-slate-100 dark:bg-slate-800"></div>
-                    <div>
-                      <div className="w-28 h-4 bg-slate-100 dark:bg-slate-800 rounded mb-1.5"></div>
-                      <div className="w-20 h-3 bg-slate-100 dark:bg-slate-800 rounded"></div>
-                    </div>
-                  </div>
-                  <div className="w-16 h-4 bg-slate-100 dark:bg-slate-800 rounded"></div>
+        {/* Transactions */}
+        <div className="bg-slate-50 dark:bg-slate-900 rounded-t-[32px] min-h-[40vh] px-5 pt-6 pb-10">
+          {loadingTx ? (
+            <div className="flex flex-col gap-4">
+              {[...Array(4)].map((_, i) => (
+                <div key={i} className="flex items-center gap-4 animate-pulse">
+                  <div className="size-10 rounded-full bg-slate-200 dark:bg-slate-700"></div>
+                  <div className="flex-1"><div className="h-4 w-32 bg-slate-200 dark:bg-slate-700 rounded mb-2"></div><div className="h-3 w-24 bg-slate-200 dark:bg-slate-700 rounded"></div></div>
+                  <div className="h-5 w-14 bg-slate-200 dark:bg-slate-700 rounded"></div>
                 </div>
-              ))
-            ) : transactions.length === 0 ? (
-              <div className="flex flex-col items-center py-10 text-slate-400">
-                <span className="material-symbols-outlined text-5xl mb-3">receipt_long</span>
-                <p className="font-semibold text-sm">No transactions yet</p>
-                <p className="text-xs mt-1">Add money to get started</p>
-              </div>
-            ) : (
-              transactions.map((tx) => {
-                const isCredit = tx.type === 'credit';
-                return (
-                  <div key={tx.id} className="bg-white dark:bg-surface-dark p-4 rounded-xl flex items-center justify-between border border-slate-100 dark:border-slate-800 shadow-sm active:bg-slate-50 transition-colors">
-                    <div className="flex items-center gap-3">
-                      <div className={`w-10 h-10 rounded-full bg-slate-50 dark:bg-slate-800 flex items-center justify-center ${isCredit ? 'text-green-600' : 'text-primary'}`}>
-                        <span className="material-symbols-outlined">
-                          {isCredit ? 'arrow_downward' : 'local_shipping'}
-                        </span>
-                      </div>
-                      <div>
-                        <p className="font-semibold text-sm">{tx.description}</p>
-                        <p className="text-xs text-slate-500">{formatDate(tx.createdAt)}</p>
-                      </div>
-                    </div>
-                    <p className={`font-bold text-sm ${isCredit ? 'text-green-600' : 'text-slate-900 dark:text-white'}`}>
-                      {isCredit ? '+' : '-'}₹{tx.amount.toLocaleString('en-IN')}
-                    </p>
+              ))}
+            </div>
+          ) : transactions.length === 0 ? (
+            <div className="flex flex-col items-center py-16 text-slate-400">
+              <span className="material-symbols-outlined text-5xl mb-3">receipt_long</span>
+              <p className="font-bold text-sm">No transactions yet</p>
+              <p className="text-xs mt-1">Add money to get started</p>
+            </div>
+          ) : (
+            <div className="flex flex-col gap-6">
+              {(Object.entries(groupedTx) as [string, Transaction[]][]).map(([date, txs]) => (
+                <div key={date}>
+                  {/* Date header */}
+                  <p className="text-xs font-bold text-slate-400 mb-3">{date}</p>
+
+                  <div className="flex flex-col gap-4">
+                    {txs.map(tx => {
+                      const isCredit = tx.type === 'credit';
+                      const refNum = `JNG${tx.id.slice(0, 10).toUpperCase()}`;
+                      return (
+                        <div key={tx.id}>
+                          {/* Transaction row */}
+                          <div className="flex items-start gap-3">
+                            <div className={`size-10 rounded-full flex items-center justify-center shrink-0 mt-0.5 ${
+                              isCredit ? 'bg-green-100 dark:bg-green-900/30' : 'bg-red-100 dark:bg-red-900/30'
+                            }`}>
+                              <span className={`material-symbols-outlined text-xl ${isCredit ? 'text-green-600' : 'text-red-500'}`}>
+                                {isCredit ? 'arrow_downward' : 'arrow_upward'}
+                              </span>
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-bold text-slate-900 dark:text-white">{tx.description}</p>
+                              {!isCredit && tx.amount > 0 && (
+                                <p className="text-xs text-slate-400 mt-0.5">Trip fare: {tx.amount} | Cash: 0.0</p>
+                              )}
+                            </div>
+                            <p className={`text-base font-black shrink-0 ${isCredit ? 'text-green-600' : 'text-red-500'}`}>
+                              {isCredit ? '+' : '–'} ₹{tx.amount.toLocaleString('en-IN')}
+                            </p>
+                          </div>
+                          {/* Reference number */}
+                          <p className="text-[10px] text-slate-300 dark:text-slate-600 mt-1.5 ml-[52px] font-mono">
+                            {refNum} | {formatRefDate(tx.createdAt)}{tx.createdAt ? `, ${formatTime(tx.createdAt)}` : ''}
+                          </p>
+                        </div>
+                      );
+                    })}
                   </div>
-                );
-              })
-            )}
-          </div>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       </main>
 
       {/* Add Money Modal */}
       {showAddModal && (
         <div className="fixed inset-0 z-[100] flex items-end justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
-          <div
-            className="w-full max-w-md bg-white dark:bg-slate-900 rounded-t-[32px] p-6 pb-12 shadow-2xl animate-in slide-in-from-bottom duration-500"
-            onClick={(e) => e.stopPropagation()}
-          >
+          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-t-[32px] p-6 pb-12 shadow-2xl animate-in slide-in-from-bottom duration-500" onClick={e => e.stopPropagation()}>
             <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full mx-auto mb-6"></div>
 
             {isSuccess ? (
@@ -249,75 +193,39 @@ const CustomerWallet: React.FC = () => {
                   <span className="material-symbols-outlined text-5xl filled">check_circle</span>
                 </div>
                 <h3 className="text-2xl font-bold">Funds Added!</h3>
-                <p className="text-slate-500 text-sm mt-2">Your balance has been updated successfully.</p>
+                <p className="text-slate-500 text-sm mt-2">Your balance has been updated.</p>
               </div>
             ) : (
               <>
-                <div className="flex items-center justify-between mb-8">
+                <div className="flex items-center justify-between mb-6">
                   <h3 className="text-xl font-bold">Add Money</h3>
                   <button onClick={() => { setShowAddModal(false); setError(''); }} className="p-2 text-slate-400">
                     <span className="material-symbols-outlined">close</span>
                   </button>
                 </div>
 
-                <div className="flex flex-col gap-6">
-                  <div className="flex flex-col gap-2">
-                    <label className="text-[10px] font-bold text-slate-400 uppercase tracking-widest ml-1">Enter Amount</label>
-                    <div className="relative">
-                      <span className="absolute left-4 top-1/2 -translate-y-1/2 text-2xl font-black text-slate-300">₹</span>
-                      <input
-                        type="number"
-                        value={addAmount}
-                        onChange={(e) => setAddAmount(e.target.value)}
-                        placeholder="0.00"
-                        className="w-full h-16 bg-slate-50 dark:bg-slate-800 border-none rounded-2xl pl-10 pr-4 text-2xl font-black text-slate-900 dark:text-white focus:ring-2 focus:ring-primary/20"
-                      />
-                    </div>
+                <div className="flex flex-col gap-5">
+                  <div className="relative">
+                    <span className="absolute left-4 top-1/2 -translate-y-1/2 text-2xl font-black text-slate-300">₹</span>
+                    <input type="number" value={addAmount} onChange={e => setAddAmount(e.target.value)} placeholder="0"
+                      className="w-full h-16 bg-slate-50 dark:bg-slate-800 border-none rounded-2xl pl-10 pr-4 text-2xl font-black focus:ring-2 focus:ring-primary/20" />
                   </div>
 
                   <div className="grid grid-cols-4 gap-2">
-                    {quickAmounts.map(amt => (
-                      <button
-                        key={amt}
-                        onClick={() => setAddAmount(amt.toString())}
-                        className="py-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-600 dark:text-slate-300 hover:bg-primary/10 hover:text-primary transition-all active:scale-95"
-                      >
+                    {[100, 500, 1000, 2000].map(amt => (
+                      <button key={amt} onClick={() => setAddAmount(amt.toString())}
+                        className="py-3 rounded-xl bg-slate-100 dark:bg-slate-800 text-xs font-bold text-slate-600 hover:bg-primary/10 hover:text-primary transition-all active:scale-95">
                         +₹{amt}
                       </button>
                     ))}
                   </div>
 
-                  <div className="bg-blue-50 dark:bg-primary/10 rounded-2xl p-4 flex items-center gap-4 border border-primary/10">
-                    <div className="size-10 bg-white dark:bg-slate-800 rounded-lg flex items-center justify-center text-primary shadow-sm">
-                      <span className="material-symbols-outlined">account_balance_wallet</span>
-                    </div>
-                    <div className="flex-1">
-                      <p className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter leading-none mb-1">Payment Method</p>
-                      <p className="text-sm font-bold">UPI / GPay / PhonePe</p>
-                    </div>
-                    <span className="material-symbols-outlined text-slate-300 text-sm">chevron_right</span>
-                  </div>
+                  {error && <p className="text-red-500 text-sm text-center font-medium">{error}</p>}
 
-                  {error && (
-                    <p className="text-red-500 text-sm text-center font-medium">{error}</p>
-                  )}
-
-                  <button
-                    disabled={!addAmount || parseFloat(addAmount) <= 0 || isProcessing}
-                    onClick={handleAddMoney}
-                    className="w-full bg-primary hover:bg-primary-dark disabled:bg-slate-200 dark:disabled:bg-slate-800 disabled:text-slate-400 text-white font-bold h-14 rounded-2xl shadow-xl shadow-primary/20 flex items-center justify-center gap-3 transition-all active:scale-[0.98]"
-                  >
-                    {isProcessing ? (
-                      <>
-                        <span className="material-symbols-outlined animate-spin">sync</span>
-                        Processing...
-                      </>
-                    ) : (
-                      <>
-                        <span>Add ₹{addAmount || '0'}</span>
-                        <span className="material-symbols-outlined">arrow_forward</span>
-                      </>
-                    )}
+                  <button disabled={!addAmount || parseFloat(addAmount) <= 0 || isProcessing} onClick={handleAddMoney}
+                    className="w-full bg-primary disabled:bg-slate-200 disabled:text-slate-400 text-white font-bold h-14 rounded-2xl shadow-xl shadow-primary/20 flex items-center justify-center gap-2 transition-all active:scale-[0.98]">
+                    {isProcessing ? <><span className="material-symbols-outlined animate-spin">sync</span> Processing...</>
+                      : <>Add ₹{addAmount || '0'}<span className="material-symbols-outlined">arrow_forward</span></>}
                   </button>
                 </div>
               </>

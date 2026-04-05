@@ -469,11 +469,10 @@ const SearchLocation: React.FC = () => {
         <div className="space-y-4">
           <div className="flex flex-col gap-1.5">
             <input
-              className={`w-full h-14 border rounded-xl px-5 text-sm font-bold transition-all ${useMyInfo ? 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 cursor-not-allowed text-slate-500 dark:text-slate-400' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 focus:ring-primary/20 focus:border-primary'}`}
-              placeholder="House / Apartment / Shop (optional)"
+              className="w-full h-14 border rounded-xl px-5 text-sm font-bold transition-all bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 focus:ring-primary/20 focus:border-primary"
+              placeholder="House / Apartment / Building (optional)"
               value={tempAddress.building || ''}
-              onChange={e => !useMyInfo && setTempAddress({...tempAddress, building: e.target.value})}
-              readOnly={useMyInfo}
+              onChange={e => setTempAddress({...tempAddress, building: e.target.value})}
             />
           </div>
 
@@ -482,22 +481,77 @@ const SearchLocation: React.FC = () => {
             <div className={`flex items-center h-14 border rounded-xl px-5 transition-all ${useMyInfo ? 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800'}`}>
               <input
                 className={`flex-1 bg-transparent border-none text-sm font-bold p-0 focus:ring-0 ${useMyInfo ? 'cursor-not-allowed text-slate-500 dark:text-slate-400' : ''}`}
+                placeholder="Full name"
                 value={tempAddress.name || ''}
                 onChange={e => !useMyInfo && setTempAddress({...tempAddress, name: e.target.value})}
                 readOnly={useMyInfo}
               />
-              <span className="material-symbols-outlined text-primary text-lg">contact_page</span>
+              <button
+                type="button"
+                onClick={async () => {
+                  if (useMyInfo) return;
+                  try {
+                    // Contact Picker API (Android Chrome + Capacitor)
+                    if ('contacts' in navigator && 'ContactsManager' in window) {
+                      const contacts = await (navigator as any).contacts.select(['name', 'tel'], { multiple: false });
+                      if (contacts?.length > 0) {
+                        const c = contacts[0];
+                        const name = c.name?.[0] || '';
+                        const phone = (c.tel?.[0] || '').replace(/[^0-9]/g, '').slice(-10);
+                        setTempAddress(prev => ({ ...prev, name: name || prev.name, mobile: phone || prev.mobile }));
+                      }
+                    } else {
+                      alert('Contact picker is available on mobile devices only. Please enter details manually.');
+                    }
+                  } catch (err: any) {
+                    if (err?.name !== 'InvalidStateError') console.warn('Contact picker:', err);
+                  }
+                }}
+                className="shrink-0 p-1 rounded-lg hover:bg-primary/10 transition-colors"
+              >
+                <span className="material-symbols-outlined text-primary text-lg">contact_page</span>
+              </button>
             </div>
           </div>
 
           <div className="flex flex-col gap-1.5 relative">
             <label className="absolute -top-2 left-4 bg-white dark:bg-slate-950 px-2 text-[10px] font-black text-slate-400 uppercase tracking-widest">{activeEditing === 'pickup' ? "Sender's" : "Receiver's"} Mobile Number</label>
-            <input
-              className={`w-full h-14 border rounded-xl px-5 text-sm font-bold transition-all ${useMyInfo ? 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 cursor-not-allowed text-slate-500 dark:text-slate-400' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 focus:ring-primary/20 focus:border-primary'}`}
-              value={tempAddress.mobile || ''}
-              onChange={e => !useMyInfo && setTempAddress({...tempAddress, mobile: e.target.value})}
-              readOnly={useMyInfo}
-            />
+            <div className={`flex items-center h-14 border rounded-xl px-5 transition-all ${useMyInfo ? 'bg-slate-100 dark:bg-slate-800 border-slate-200 dark:border-slate-700 cursor-not-allowed' : 'bg-white dark:bg-slate-900 border-slate-200 dark:border-slate-800 focus-within:ring-primary/20 focus-within:border-primary'}`}>
+              <input
+                type="tel"
+                inputMode="numeric"
+                maxLength={10}
+                className={`flex-1 bg-transparent border-none text-sm font-bold p-0 focus:ring-0 ${useMyInfo ? 'cursor-not-allowed text-slate-500 dark:text-slate-400' : ''}`}
+                placeholder="10-digit mobile number"
+                value={tempAddress.mobile || ''}
+                onChange={e => !useMyInfo && setTempAddress({...tempAddress, mobile: e.target.value.replace(/[^0-9]/g, '').slice(0, 10)})}
+                readOnly={useMyInfo}
+              />
+              <button
+                type="button"
+                onClick={async () => {
+                  if (useMyInfo) return;
+                  try {
+                    if ('contacts' in navigator && 'ContactsManager' in window) {
+                      const contacts = await (navigator as any).contacts.select(['name', 'tel'], { multiple: false });
+                      if (contacts?.length > 0) {
+                        const c = contacts[0];
+                        const name = c.name?.[0] || '';
+                        const phone = (c.tel?.[0] || '').replace(/[^0-9]/g, '').slice(-10);
+                        setTempAddress(prev => ({ ...prev, name: name || prev.name, mobile: phone || prev.mobile }));
+                      }
+                    } else {
+                      alert('Contact picker is available on mobile devices only. Please enter details manually.');
+                    }
+                  } catch (err: any) {
+                    if (err?.name !== 'InvalidStateError') console.warn('Contact picker:', err);
+                  }
+                }}
+                className="shrink-0 p-1 rounded-lg hover:bg-primary/10 transition-colors"
+              >
+                <span className="material-symbols-outlined text-primary text-lg">contacts</span>
+              </button>
+            </div>
           </div>
 
           {activeEditing === 'pickup' && (
@@ -509,9 +563,9 @@ const SearchLocation: React.FC = () => {
                   const checked = e.target.checked;
                   setUseMyInfo(checked);
                   if (checked && userProfile) {
-                    setTempAddress(prev => ({ ...prev, name: userProfile.name, mobile: userProfile.phoneNumber, building: userProfile.defaultBuilding }));
+                    setTempAddress(prev => ({ ...prev, name: userProfile.name, mobile: userProfile.phoneNumber }));
                   } else {
-                    setTempAddress(prev => ({ ...prev, name: '', mobile: '', building: '' }));
+                    setTempAddress(prev => ({ ...prev, name: '', mobile: '' }));
                   }
                 }}
                 className="rounded text-primary size-5 focus:ring-primary cursor-pointer"

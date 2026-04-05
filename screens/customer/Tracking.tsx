@@ -5,6 +5,45 @@ import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
 import { BookingStatus, Trip } from '../../types.ts';
 import { Map, AdvancedMarker } from '@vis.gl/react-google-maps';
 
+const SEARCHING_MESSAGES = [
+  'We are finding a driver for you...',
+  'You will be assigned a driver soon',
+  'Looking for the nearest available driver...',
+  'Matching you with the best rider...',
+  'Almost there! Assigning a driver...',
+  'Checking driver availability in your area...',
+];
+
+const SearchingRiderAnimation: React.FC = () => {
+  const [msgIdx, setMsgIdx] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => {
+      setMsgIdx(prev => (prev + 1) % SEARCHING_MESSAGES.length);
+    }, 3000);
+    return () => clearInterval(interval);
+  }, []);
+
+  return (
+    <div className="py-10 flex flex-col items-center text-center gap-4">
+      <div className="relative size-20">
+        <div className="absolute inset-0 border-4 border-primary/10 rounded-full"></div>
+        <div className="absolute inset-0 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
+        <div className="absolute inset-0 flex items-center justify-center">
+          <span className="material-symbols-outlined text-primary text-3xl animate-pulse">search</span>
+        </div>
+      </div>
+      <div className="flex flex-col gap-2">
+        <h3 className="font-black text-xl dark:text-white">Finding a Rider</h3>
+        <p className="text-xs text-slate-400 font-medium h-4 transition-opacity duration-500 animate-in fade-in"
+          key={msgIdx}>
+          {SEARCHING_MESSAGES[msgIdx]}
+        </p>
+      </div>
+    </div>
+  );
+};
+
 const Tracking: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -471,19 +510,7 @@ const Tracking: React.FC = () => {
             })()}
           </>
         ) : (
-          <div className="py-10 flex flex-col items-center text-center gap-4">
-            <div className="relative size-20">
-              <div className="absolute inset-0 border-4 border-primary/10 rounded-full"></div>
-              <div className="absolute inset-0 border-4 border-primary border-t-transparent rounded-full animate-spin"></div>
-              <div className="absolute inset-0 flex items-center justify-center">
-                <span className="material-symbols-outlined text-primary text-3xl animate-pulse">search</span>
-              </div>
-            </div>
-            <div className="flex flex-col gap-1">
-              <h3 className="font-black text-xl dark:text-white">Finding a Rider</h3>
-              <p className="text-xs text-slate-400 font-bold uppercase tracking-widest">Assigning the nearest vehicle...</p>
-            </div>
-          </div>
+          <SearchingRiderAnimation />
         )}
 
         {/* Live Progress Timeline */}

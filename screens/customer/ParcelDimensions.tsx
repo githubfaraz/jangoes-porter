@@ -9,6 +9,7 @@ const ParcelDimensions: React.FC = () => {
   const [weightUnit, setWeightUnit] = useState<'kg' | 'g'>('g');
   const [dimensions, setDimensions] = useState({ length: '', width: '', height: '' });
   const [unit, setUnit] = useState<'cm' | 'inches'>('cm');
+  const [productCost, setProductCost] = useState('');
   const [volumetricWeight, setVolumetricWeight] = useState(0);
   const [chargeableWeight, setChargeableWeight] = useState(0);
   const [estimatedCost, setEstimatedCost] = useState(0);
@@ -116,6 +117,26 @@ const ParcelDimensions: React.FC = () => {
               <span className="text-xs font-black text-slate-300 uppercase tracking-[0.2em]">{weightUnit}</span>
             </div>
           </div>
+        </div>
+
+        {/* Product Cost */}
+        <div className="flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-primary text-lg">currency_rupee</span>
+            <span className="text-sm font-black text-slate-700 dark:text-slate-200">Product Value (in Rupees)</span>
+          </div>
+          <div className="relative">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-black text-slate-400">₹</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              value={productCost}
+              onChange={e => setProductCost(e.target.value)}
+              placeholder="0"
+              className="w-full h-14 bg-white dark:bg-slate-800 border-2 border-slate-100 dark:border-slate-700 rounded-2xl pl-10 pr-5 text-base font-bold focus:border-primary transition-all"
+            />
+          </div>
+          <p className="text-[9px] text-slate-400 font-medium ml-1">Declared value for insurance and liability purposes.</p>
         </div>
 
         <div className="h-px bg-slate-100 dark:bg-slate-800"></div>
@@ -235,7 +256,7 @@ const ParcelDimensions: React.FC = () => {
 
       <footer className="fixed bottom-0 left-0 right-0 max-w-md mx-auto p-5 bg-white/95 dark:bg-surface-dark/95 backdrop-blur-md border-t border-slate-100 dark:border-slate-800 z-[60] shadow-[0_-10px_30px_rgba(0,0,0,0.05)]">
         <button 
-          onClick={() => navigate('/vehicles', { state: { ...bookingState, dimensions: { chargeableWeight, estimatedCost } } })}
+          onClick={() => navigate('/vehicles', { state: { ...bookingState, dimensions: { chargeableWeight, estimatedCost }, productCost: parseFloat(productCost) || 0 } })}
           disabled={!isFormValid}
           className="w-full bg-primary hover:bg-primary-dark text-white font-black h-16 rounded-[24px] shadow-2xl shadow-primary/30 flex items-center justify-center gap-3 disabled:opacity-50 disabled:grayscale transition-all active:scale-[0.98]"
         >

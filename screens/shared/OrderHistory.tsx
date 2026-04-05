@@ -8,6 +8,11 @@ const ONGOING_STATUSES = [
   BookingStatus.SEARCHING, BookingStatus.ACCEPTED, BookingStatus.ARRIVED_AT_PICKUP,
   BookingStatus.PICKING_UP, BookingStatus.IN_TRANSIT, BookingStatus.ARRIVED_AT_DESTINATION,
   BookingStatus.DROPPING_OFF,
+  // Exchange statuses
+  BookingStatus.ARRIVED_AT_RECEIVER, BookingStatus.PICKING_UP_PRODUCT_B,
+  BookingStatus.QC_PENDING, BookingStatus.QC_APPROVED, BookingStatus.QC_REJECTED,
+  BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A,
+  BookingStatus.ARRIVED_AT_ORIGIN_RETURN,
 ];
 
 function formatDate(ts: any): string {
@@ -27,13 +32,23 @@ function statusLabel(s: BookingStatus): string {
     case BookingStatus.DROPPING_OFF: return 'Dropping Off';
     case BookingStatus.COMPLETED: return 'Delivered';
     case BookingStatus.CANCELLED: return 'Cancelled';
+    case BookingStatus.ARRIVED_AT_RECEIVER: return 'At Receiver';
+    case BookingStatus.PICKING_UP_PRODUCT_B: return 'Collecting Product B';
+    case BookingStatus.QC_PENDING: return 'QC Review';
+    case BookingStatus.QC_APPROVED: return 'QC Approved';
+    case BookingStatus.QC_REJECTED: return 'QC Rejected';
+    case BookingStatus.RETURNING_PRODUCT_B: return 'Returning Product B';
+    case BookingStatus.RETURNING_PRODUCT_A: return 'Returning Product A';
+    case BookingStatus.ARRIVED_AT_ORIGIN_RETURN: return 'At Origin';
+    case BookingStatus.EXCHANGE_COMPLETED: return 'Exchange Done';
+    case BookingStatus.EXCHANGE_FAILED: return 'Exchange Failed';
     default: return s;
   }
 }
 
 function statusStyle(s: BookingStatus): string {
-  if (s === BookingStatus.COMPLETED) return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
-  if (s === BookingStatus.CANCELLED) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
+  if (s === BookingStatus.COMPLETED || s === BookingStatus.EXCHANGE_COMPLETED) return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
+  if (s === BookingStatus.CANCELLED || s === BookingStatus.EXCHANGE_FAILED) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
   return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
 }
 
@@ -79,7 +94,7 @@ const OrderHistory: React.FC = () => {
   }, []);
 
   const ongoing = trips.filter(t => ONGOING_STATUSES.includes(t.status));
-  const history = trips.filter(t => t.status === BookingStatus.COMPLETED || t.status === BookingStatus.CANCELLED);
+  const history = trips.filter(t => [BookingStatus.COMPLETED, BookingStatus.CANCELLED, BookingStatus.EXCHANGE_COMPLETED, BookingStatus.EXCHANGE_FAILED].includes(t.status));
   const display = activeTab === 'ongoing' ? ongoing : history;
 
   return (
