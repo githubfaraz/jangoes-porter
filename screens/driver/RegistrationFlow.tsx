@@ -810,9 +810,17 @@ const RegistrationFlow: React.FC<RegistrationFlowProps> = ({ onComplete }) => {
             Step {step} of {STEPS.length} — {STEPS[step - 1].title}
           </p>
         </div>
-        <div className="size-10 rounded-2xl bg-primary/10 flex items-center justify-center text-primary">
-          <span className="material-symbols-outlined filled">verified_user</span>
-        </div>
+        <button
+          onClick={() => {
+            if (window.confirm('Exit registration? Your progress is saved — you can resume from where you left off when you log back in.')) {
+              auth.signOut().then(() => navigate('/auth'));
+            }
+          }}
+          className="flex items-center gap-1.5 px-3 h-9 bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 rounded-xl text-xs font-bold hover:bg-slate-200 dark:hover:bg-slate-700 transition-colors active:scale-95"
+        >
+          <span className="material-symbols-outlined text-base">logout</span>
+          Exit
+        </button>
       </header>
 
       {/* Step Stepper */}
