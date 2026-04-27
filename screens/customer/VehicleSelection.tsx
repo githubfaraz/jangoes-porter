@@ -173,30 +173,28 @@ const VehicleSelection: React.FC = () => {
             {VEHICLE_TYPES.filter(v => enabledVehicles[v.id] !== false).map((v) => {
               const driverCount = availableCategories[v.id] || 0;
               const isAvailable = driverCount > 0;
-              const isUnavailable = !loadingAvailability && !isAvailable;
+              const noDriversYet = !loadingAvailability && !isAvailable;
               return (
               <button
                 key={v.id}
-                onClick={() => isAvailable && setSelected(v.id)}
-                disabled={isUnavailable}
+                onClick={() => setSelected(v.id)}
                 className={`relative flex items-center gap-3 p-3 rounded-xl border-2 transition-all text-left ${
-                  isUnavailable ? 'border-slate-100 bg-slate-50 dark:bg-slate-900 opacity-40 cursor-not-allowed' :
                   selected === v.id ? 'border-primary bg-blue-50/50 dark:bg-primary/10 shadow-md ring-1 ring-primary/20' : 'border-slate-100 bg-white dark:bg-slate-800'
                 }`}
               >
                 {/* Icon */}
                 <div className={`size-10 rounded-xl flex items-center justify-center shrink-0 ${
-                  isUnavailable ? 'bg-slate-100' : selected === v.id ? 'bg-primary/10' : 'bg-slate-50 dark:bg-slate-700'
+                  selected === v.id ? 'bg-primary/10' : 'bg-slate-50 dark:bg-slate-700'
                 }`}>
-                  <span className={`material-symbols-outlined text-2xl ${isUnavailable ? 'text-slate-300' : selected === v.id ? 'text-primary' : 'text-slate-400'}`}>{(v as any).icon || 'local_shipping'}</span>
+                  <span className={`material-symbols-outlined text-2xl ${selected === v.id ? 'text-primary' : 'text-slate-400'}`}>{(v as any).icon || 'local_shipping'}</span>
                 </div>
                 {/* Info */}
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2">
                     <span className="text-sm font-bold truncate">{v.name}</span>
-                    {isUnavailable && <span className="text-[8px] font-black bg-slate-200 text-slate-500 px-1.5 py-0.5 rounded-full uppercase">No Drivers</span>}
-                    {!isUnavailable && v.bestValue && <span className="text-[8px] font-black bg-primary text-white px-1.5 py-0.5 rounded-full">BEST</span>}
-                    {!isUnavailable && isAvailable && !v.bestValue && <span className="text-[8px] font-black bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">{driverCount} online</span>}
+                    {noDriversYet && <span className="text-[8px] font-black bg-amber-100 text-amber-700 px-1.5 py-0.5 rounded-full uppercase">No drivers nearby</span>}
+                    {isAvailable && v.bestValue && <span className="text-[8px] font-black bg-primary text-white px-1.5 py-0.5 rounded-full">BEST</span>}
+                    {isAvailable && !v.bestValue && <span className="text-[8px] font-black bg-green-100 text-green-700 px-1.5 py-0.5 rounded-full">{driverCount} online</span>}
                   </div>
                   <span className="text-[10px] text-slate-400">{v.capacity} • {v.time}</span>
                 </div>
@@ -251,7 +249,7 @@ const VehicleSelection: React.FC = () => {
 
           <div className="px-5 flex flex-col gap-4">
             <button
-              disabled={!selected || (!loadingAvailability && !(availableCategories[selected] > 0))}
+              disabled={!selected}
               onClick={() => navigate('/summary', {
                 state: {
                   ...bookingState,

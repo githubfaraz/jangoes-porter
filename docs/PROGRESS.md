@@ -36,6 +36,23 @@ Notes on the fields:
 
 ---
 
+## 2026-04-27 — Fix: vehicle selection no longer blocks customer when no drivers online
+
+**Done**
+- `VehicleSelection.tsx`: removed the hard `disabled` on vehicle cards and the secondary disable check on "Book Now". Cards stay informative (still show "X online" / "No drivers nearby" badges) but the customer can always pick a vehicle and proceed. The trip enters `SEARCHING` like normal — drivers can pick it up when they come online.
+
+**Why this fix**
+- User reported all vehicle options disabled in the Exchange booking flow. The disable logic isn't Exchange-specific — same gating applies to regular delivery. It fires when `/api/driver-availability` returns `0` for every `vehicleCategory`. That happens when (a) no drivers in Firestore have `kycCompleted=true` AND a `vehicleCategory` set, or (b) the API call fails and the catch in `VehicleSelection.tsx:57-61` swallows the error, leaving `availableCategories = {}`. Either way the UX of trapping the user is wrong — booking should proceed and queue.
+
+**Open questions for follow-up**
+- Worth diagnosing the underlying availability data on the user's environment: open the network tab on the Vehicle Selection screen, find the `/api/driver-availability` request, and check whether `counts` is empty. If it is, verify drivers in Firestore have `kycCompleted: true`, `disabled` not `true`, and a `vehicleCategory` matching `bike` / `car` / `tata-ace` / `bolero` / `tata-407` / `large-truck`.
+
+**Files touched**
+- `screens/customer/VehicleSelection.tsx`
+- `docs/PROGRESS.md`
+
+---
+
 ## 2026-04-27 — Exchange flow: post-QC handover OTP + 3-leg history + driver payouts wired
 
 **Done**
