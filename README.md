@@ -43,6 +43,7 @@ See `CLAUDE.md` §4 for the full breakdown. Top-level highlights:
 - **`CLAUDE.md`** — entry point. Stack, architecture, conventions, gotchas, env vars, key files.
 - **`docs/PROGRESS.md`** — daily session log; current state of in-flight work and pending features.
 - **`docs/SESSION_START.md`** — paste-at-start prompt for new Claude Code sessions.
+- **`docs/PRODUCT_SPECIFICATION.md`** — client-facing product specification (sales/partnership document).
 - **`docs/project-specs.md`** — deep dive on schema, routing, feature status.
 - **`docs/architecture-decisions.md`** — ADR-style design rationale.
 - **`docs/api-integration.md`** — Gemini SDK usage patterns.

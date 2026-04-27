@@ -170,6 +170,7 @@ These exist already; read them when the topic comes up.
 | `FARE_CALCULATION_LOGIC.md` (root) | Full fare formula: base, distance, weight, time-of-day, waiting, toll, GST. |
 | `docs/PROGRESS.md` | **Daily session log.** Always read this second after CLAUDE.md. |
 | `docs/SESSION_START.md` | The exact prompt to paste at session start. |
+| `docs/PRODUCT_SPECIFICATION.md` | **Client-facing product spec** — sales/partnership document. Don't dump internal/implementation details into it; keep it polished. |
 
 ## 10. How to Work in This Repo
 
