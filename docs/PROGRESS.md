@@ -36,6 +36,35 @@ Notes on the fields:
 
 ---
 
+## 2026-04-27 — Upload-feedback polish + Driver Registration Exit button
+
+**Done**
+- **`ExchangeDetails.tsx`** (customer Exchange setup): added inline size-14 spinner tile + "Uploading…" caption for Product A and Product B reference photo uploads. Each product gets its own busy state (`uploadingA` / `uploadingB`) so the two upload buttons don't interfere with each other. Primary blue tint for Product A, emerald for Product B (matches each card's accent color). The "+" button hides during upload and reappears once finished. Failure path (`alert('Photo upload failed.')`) untouched. *(Commit `f46a103`)*
+- **`RegistrationFlow.tsx`** (driver KYC): replaced the decorative `verified_user` shield in the header with a real **Exit** button (logout icon + "Exit" label). On click → `window.confirm` → `auth.signOut()` → navigate to `/auth`. The user's progress is preserved because the existing per-step `saveProgress()` writes (lines 300, 349, 394, 460, 538, 597, 679, 715, 1426) already commit `kycStep` + `kycData.*` to Firestore after each completed step; on next login the existing mount-time effect reads `kycStep` and resumes at the saved step. *(Commit `3708f15`)*
+- **`ExchangeTrip.tsx`** (driver Exchange flow): added spinner feedback for the three remaining upload sites that previously gave no signal — Product A photo at PICKING_UP (placeholder card with primary-blue spinner), Product B photo at PICKING_UP_PRODUCT_B (emerald spinner), QC photos strip (size-16 inline tile matching existing thumbnail size, amber tint). Each gets its own busy state (`uploadingProductA`, `uploadingProductB`, `uploadingQc`) — separate from the shared `loading` flag used for status updates. *(Commit `e39ae83`)*
+- Audited every other upload site in the codebase. ParcelDetails uses synchronous FileReader (no async to track). PendingVerification PAN re-upload is instant on select; the verify step has its own button-level spinner. RegistrationFlow doc OCR and vehicle bulk-upload already show "Verifying…" / "Uploading Images…" button spinners. ActiveTrip parcel image already has an overlay spinner. No further changes needed.
+
+**In progress**
+- _(none — all three follow-up fixes shipped and pushed)_
+
+**Next**
+- User testing the Driver Exchange flow end-to-end with the new upload feedback.
+- Eventually: register a DLT template for the post-QC handover SMS so the body matches the desired text "Your exchange is completed, please share the OTP for new product delivery" (currently the receiver receives the existing generic delivery-OTP template body).
+
+**Open questions**
+- _(none new)_ — carrying forward from earlier today: (a) DLT template not yet registered for handover OTP, (b) `/api/driver-availability` should be diagnosed at some point to understand why all categories returned 0 in the user's environment.
+
+**Notes / drift**
+- Mid-step partial field state (e.g., user typed half their name in Step 1 but didn't click Next) is **not** preserved by the Exit button — they'll resume at the *start* of that step. Per-keystroke writes were considered out of scope; flag this if the resume-fidelity needs to improve.
+
+**Files touched**
+- `screens/customer/ExchangeDetails.tsx` — upload spinner + per-product busy state
+- `screens/driver/RegistrationFlow.tsx` — header Exit button replacing decorative shield
+- `screens/driver/ExchangeTrip.tsx` — upload spinners for Product A / Product B / QC strip
+- `docs/PROGRESS.md` — this entry
+
+---
+
 ## 2026-04-27 — Fix: vehicle selection no longer blocks customer when no drivers online
 
 **Done**
