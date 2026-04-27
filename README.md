@@ -1,20 +1,50 @@
-<div align="center">
-<img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
-</div>
+# Jangoes Porter
 
-# Run and deploy your AI Studio app
+A mobile-first web app for parcel/logistics delivery in India — Uber-for-packages. Customers book deliveries, drivers (with KYC) accept and fulfil them. Pricing is computed live per booking using real road distance, vehicle type, weight, and time-of-day surcharges.
 
-This contains everything you need to run your app locally.
+**Stack:** React 19 + TypeScript + Vite (frontend) · Express 5 (backend) · Firebase Auth + Firestore + Storage · Google Maps · Gemini AI · voicensms.in (OTP) · Capacitor (Android + iOS shells).
 
-View your app in AI Studio: https://ai.studio/apps/36f8fc29-ecad-475f-a89c-874c6c794022
+## Prerequisites
 
-## Run Locally
+- Node.js 20+
+- A `.env` file at the project root with the variables listed in `CLAUDE.md` §7 (Firebase Admin credentials, Google Maps key, Firebase web config, voicensms.in SMS keys).
 
-**Prerequisites:**  Node.js
+## Run locally
 
+```bash
+npm install
+npm run dev          # Express + Vite middleware on http://localhost:3000
+```
 
-1. Install dependencies:
-   `npm install`
-2. Set the `GEMINI_API_KEY` in [.env.local](.env.local) to your Gemini API key
-3. Run the app:
-   `npm run dev`
+Other scripts:
+
+```bash
+npm run build        # production build to dist/
+npm run preview      # preview the production build
+npm run lint         # tsc --noEmit (typecheck only)
+npm run cap:android  # build + cap sync + open Android Studio
+npm run cap:ios      # build + cap sync + open Xcode
+```
+
+## Project structure
+
+See `CLAUDE.md` §4 for the full breakdown. Top-level highlights:
+
+- `server.ts` — Express server (OTP, KYC OCR proxy, Vite middleware)
+- `App.tsx` — root component, routing, auth/role/KYC guards
+- `screens/` — `customer/`, `driver/`, `shared/`
+- `services/geminiService.ts` — Gemini AI helpers
+- `src/firebase.ts` — Firebase client init
+- `admin/` — separate admin SPA
+- `android/`, `ios/` — Capacitor native projects
+
+## Documentation
+
+- **`CLAUDE.md`** — entry point. Stack, architecture, conventions, gotchas, env vars, key files.
+- **`docs/PROGRESS.md`** — daily session log; current state of in-flight work and pending features.
+- **`docs/SESSION_START.md`** — paste-at-start prompt for new Claude Code sessions.
+- **`docs/project-specs.md`** — deep dive on schema, routing, feature status.
+- **`docs/architecture-decisions.md`** — ADR-style design rationale.
+- **`docs/api-integration.md`** — Gemini SDK usage patterns.
+- **`docs/idea-inbox-mvp-roadmap.md`** — vision and roadmap.
+- **`FARE_CALCULATION_LOGIC.md`** — full fare formula spec.
