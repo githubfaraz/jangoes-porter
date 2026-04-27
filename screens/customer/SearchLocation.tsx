@@ -2,7 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { Map, AdvancedMarker, useMap, useMapsLibrary } from '@vis.gl/react-google-maps';
 import { auth, db } from '../../src/firebase.ts';
-import { doc, getDoc, setDoc } from 'firebase/firestore';
+import { doc, getDoc } from 'firebase/firestore';
 
 interface AddressDetails {
   title: string;
@@ -38,10 +38,7 @@ const SearchLocation: React.FC = () => {
   const [isSearching, setIsSearching] = useState(false);
   const [userLoc, setUserLoc] = useState<{lat: number, lng: number} | null>(null);
   const [useMyInfo, setUseMyInfo] = useState(false);
-  const [userProfile, setUserProfile] = useState<{ name: string; phoneNumber: string; defaultBuilding: string } | null>(null);
-  const [showAddressModal, setShowAddressModal] = useState(false);
-  const [modalBuilding, setModalBuilding] = useState('');
-  const [isSavingBuilding, setIsSavingBuilding] = useState(false);
+  const [userProfile, setUserProfile] = useState<{ name: string; phoneNumber: string } | null>(null);
 
   useEffect(() => {
     if (navigator.geolocation) {
@@ -59,7 +56,7 @@ const SearchLocation: React.FC = () => {
     getDoc(doc(db, 'users', user.uid)).then(snap => {
       if (snap.exists()) {
         const d = snap.data();
-        setUserProfile({ name: d.name || '', phoneNumber: d.phoneNumber || '', defaultBuilding: d.defaultBuilding || '' });
+        setUserProfile({ name: d.name || '', phoneNumber: d.phoneNumber || '' });
       }
     });
   }, []);
@@ -207,22 +204,6 @@ const SearchLocation: React.FC = () => {
       // From map picker — use mapCenter coordinates
       setTempAddress({ title: place.title || mapAddress, address: place.address || mapAddress, lat: mapCenter.lat, lng: mapCenter.lng, name: '', mobile: '', type: null } as any);
       setView('details_form');
-    }
-  };
-
-  const handleSaveBuilding = async () => {
-    const user = auth.currentUser;
-    if (!user || !modalBuilding.trim()) return;
-    setIsSavingBuilding(true);
-    try {
-      await setDoc(doc(db, 'users', user.uid), { defaultBuilding: modalBuilding.trim() }, { merge: true });
-      const updated = { ...(userProfile ?? { name: '', phoneNumber: '' }), defaultBuilding: modalBuilding.trim() };
-      setUserProfile(updated);
-      setTempAddress(prev => ({ ...prev, building: modalBuilding.trim() }));
-      setShowAddressModal(false);
-      setModalBuilding('');
-    } finally {
-      setIsSavingBuilding(false);
     }
   };
 
@@ -570,22 +551,7 @@ const SearchLocation: React.FC = () => {
                 }}
                 className="rounded text-primary size-5 focus:ring-primary cursor-pointer"
               />
-              <div className="flex flex-col gap-1">
-                <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Use My Details</span>
-                {useMyInfo && userProfile && !userProfile.defaultBuilding && (
-                  <span className="text-xs text-red-500 font-semibold">
-                    No default address saved. Please{' '}
-                    <button
-                      type="button"
-                      onClick={() => { setModalBuilding(''); setShowAddressModal(true); }}
-                      className="underline font-black text-red-600"
-                    >
-                      update your profile
-                    </button>
-                    .
-                  </span>
-                )}
-              </div>
+              <span className="text-sm font-medium text-slate-600 dark:text-slate-400">Use My Details</span>
             </div>
           )}
         </div>
@@ -633,45 +599,6 @@ const SearchLocation: React.FC = () => {
       {view === 'map_picker' && renderMapPicker()}
       {view === 'details_form' && renderDetailsForm()}
 
-      {/* Default Address Modal */}
-      {showAddressModal && (
-        <div className="absolute inset-0 z-[200] flex items-end justify-center bg-black/50 backdrop-blur-sm animate-in fade-in duration-200">
-          <div className="w-full max-w-md bg-white dark:bg-slate-900 rounded-t-3xl p-6 flex flex-col gap-5 animate-in slide-in-from-bottom duration-300 shadow-2xl">
-            <div className="flex items-center justify-between">
-              <h3 className="text-base font-black text-slate-900 dark:text-white">Set Default Address</h3>
-              <button
-                onClick={() => setShowAddressModal(false)}
-                className="size-8 flex items-center justify-center rounded-full hover:bg-slate-100 dark:hover:bg-slate-800 transition-colors"
-              >
-                <span className="material-symbols-outlined text-slate-500">close</span>
-              </button>
-            </div>
-            <p className="text-xs text-slate-500 -mt-2">This will be saved to your profile and auto-filled every time you book a pickup.</p>
-            <div className="flex flex-col gap-1.5">
-              <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">House / Flat / Building No.</label>
-              <input
-                autoFocus
-                type="text"
-                value={modalBuilding}
-                onChange={e => setModalBuilding(e.target.value)}
-                placeholder="e.g. Flat 4B, Tower C, Green Park"
-                className="w-full h-14 bg-slate-50 dark:bg-slate-800 border border-slate-200 dark:border-slate-700 rounded-xl px-5 text-sm font-bold focus:ring-primary/20 focus:border-primary transition-all"
-                onKeyDown={e => e.key === 'Enter' && !isSavingBuilding && modalBuilding.trim() && handleSaveBuilding()}
-              />
-            </div>
-            <button
-              onClick={handleSaveBuilding}
-              disabled={!modalBuilding.trim() || isSavingBuilding}
-              className="w-full h-14 bg-primary text-white font-black rounded-2xl shadow-lg shadow-primary/20 flex items-center justify-center gap-2 disabled:opacity-40 active:scale-95 transition-all"
-            >
-              {isSavingBuilding
-                ? <span className="material-symbols-outlined animate-spin text-lg">sync</span>
-                : <><span className="material-symbols-outlined text-lg">save</span><span>Save Address</span></>
-              }
-            </button>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

@@ -20,6 +20,9 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
   const [productBImage, setProductBImage] = useState<string | null>(null);
   const [handoverOtpInput, setHandoverOtpInput] = useState('');
   const [returnOtpInput, setReturnOtpInput] = useState('');
+  const [receiverOtpInput, setReceiverOtpInput] = useState('');
+  const [receiverOtpVerified, setReceiverOtpVerified] = useState(false);
+  const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
   const [qcRemarks, setQcRemarks] = useState('');
   const [qcPhotos, setQcPhotos] = useState<string[]>([]);
   const [qcChecked, setQcChecked] = useState<Record<number, boolean>>({});
@@ -75,6 +78,16 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
       setQcPhotos(prev => [...prev, url]);
     } catch { alert('Upload failed.'); }
     finally { setLoading(false); e.target.value = ''; }
+  };
+
+  const sendReceiverOtp = () => {
+    if (trip.receiverPhone && trip.dropoffOtp) {
+      fetch('/api/send-delivery-otp', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ receiverPhone: trip.receiverPhone, otp: trip.dropoffOtp }),
+      }).catch(() => {});
+    }
   };
 
   // Completion screens
@@ -211,7 +224,7 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
               </div>
             )}
           </div>
-          <button onClick={() => update(BookingStatus.ARRIVED_AT_RECEIVER)} disabled={loading}
+          <button onClick={() => { sendReceiverOtp(); update(BookingStatus.ARRIVED_AT_RECEIVER); }} disabled={loading}
             className="w-full h-14 bg-primary text-white font-black rounded-2xl shadow-lg flex items-center justify-center gap-2 disabled:opacity-50">
             <span className="material-symbols-outlined">location_on</span>I HAVE REACHED RECEIVER
           </button>
@@ -225,21 +238,58 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
           <div className="p-3 bg-green-50 rounded-2xl text-center">
             <p className="text-xs font-bold text-green-600 uppercase tracking-widest">At Receiver Location</p>
           </div>
-          <div className="bg-blue-50 rounded-xl p-3">
-            <p className="text-[10px] font-black text-blue-600 uppercase mb-1">Hand over Product A to receiver</p>
-            <p className="text-sm font-medium">{exchange?.productA?.description || 'Item'}</p>
-          </div>
-          <p className="text-sm text-slate-600 font-medium text-center">Is Product B available for collection?</p>
-          <div className="flex gap-3">
-            <button onClick={() => { setProductBAvailable(true); update(BookingStatus.PICKING_UP_PRODUCT_B); }} disabled={loading}
-              className="flex-1 h-14 bg-green-600 text-white font-black rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50">
-              <span className="material-symbols-outlined">check</span>Yes, Available
-            </button>
-            <button onClick={() => { setProductBAvailable(false); update(BookingStatus.RETURNING_PRODUCT_A, { 'exchange.failureReason': 'product_b_unavailable' }); }} disabled={loading}
-              className="flex-1 h-14 bg-red-500 text-white font-black rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50">
-              <span className="material-symbols-outlined">close</span>Not Available
-            </button>
-          </div>
+
+          {!receiverOtpVerified ? (
+            <>
+              {/* OTP verification before handover */}
+              <div className="flex flex-col gap-2">
+                <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Enter Receiver OTP</label>
+                <input type="text" maxLength={4} value={receiverOtpInput} onChange={e => setReceiverOtpInput(e.target.value)}
+                  className="w-full h-14 bg-white border-2 border-slate-100 rounded-2xl px-5 text-center text-2xl font-black tracking-[0.5em] focus:border-primary" placeholder="----" />
+                <div className="flex items-center justify-between">
+                  <p className="text-[9px] text-slate-400 ml-1">OTP has been sent to receiver's phone</p>
+                  <button type="button" onClick={() => { sendReceiverOtp(); alert('OTP resent to receiver.'); }}
+                    className="text-[10px] font-black text-primary uppercase tracking-widest">
+                    Resend OTP
+                  </button>
+                </div>
+              </div>
+              <button onClick={() => {
+                if (receiverOtpInput !== trip.dropoffOtp) { alert('Invalid OTP. Ask the receiver for the correct OTP sent to their phone.'); return; }
+                setReceiverOtpVerified(true);
+              }} disabled={loading}
+                className="w-full h-14 bg-primary text-white font-black rounded-2xl shadow-lg flex items-center justify-center gap-2 disabled:opacity-50">
+                <span className="material-symbols-outlined">verified</span>VERIFY OTP
+              </button>
+            </>
+          ) : (
+            <>
+              {/* OTP verified — show product A image for verification, then handover options */}
+              <div className="bg-blue-50 rounded-xl p-3">
+                <p className="text-[10px] font-black text-blue-600 uppercase mb-2">Verify & Hand Over Product A</p>
+                <p className="text-sm font-medium mb-2">{exchange?.productA?.description || 'Item'}</p>
+                {exchange?.productA?.images?.[0] && (
+                  <img
+                    src={exchange.productA.images[0]}
+                    alt="Product A"
+                    className="w-full h-40 rounded-xl object-cover border border-blue-200 cursor-pointer active:opacity-80"
+                    onClick={() => setFullScreenImage(exchange.productA.images[0])}
+                  />
+                )}
+              </div>
+              <p className="text-sm text-slate-600 font-medium text-center">Is Product B available for collection?</p>
+              <div className="flex gap-3">
+                <button onClick={() => { setProductBAvailable(true); update(BookingStatus.PICKING_UP_PRODUCT_B); }} disabled={loading}
+                  className="flex-1 h-14 bg-green-600 text-white font-black rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50">
+                  <span className="material-symbols-outlined">check</span>Yes, Available
+                </button>
+                <button onClick={() => { setProductBAvailable(false); update(BookingStatus.RETURNING_PRODUCT_A, { 'exchange.failureReason': 'product_b_unavailable' }); }} disabled={loading}
+                  className="flex-1 h-14 bg-red-500 text-white font-black rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50">
+                  <span className="material-symbols-outlined">close</span>Not Available
+                </button>
+              </div>
+            </>
+          )}
         </div>
       );
     }
@@ -526,6 +576,19 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
           </div>
         </div>
       </div>
+
+      {/* Full-screen image viewer */}
+      {fullScreenImage && (
+        <div
+          className="fixed inset-0 z-[200] bg-black/90 flex items-center justify-center animate-in fade-in duration-200"
+          onClick={() => setFullScreenImage(null)}
+        >
+          <button className="absolute top-4 right-4 p-2 text-white/80 hover:text-white" onClick={() => setFullScreenImage(null)}>
+            <span className="material-symbols-outlined text-3xl">close</span>
+          </button>
+          <img src={fullScreenImage} alt="Product" className="max-w-full max-h-full object-contain p-4" />
+        </div>
+      )}
     </div>
   );
 };

@@ -279,6 +279,14 @@ const Tracking: React.FC = () => {
                     'exchange.qcDecision': 'approved',
                     'exchange.qcDecisionAt': new Date().toISOString(),
                   });
+                  // Send delivery OTP to receiver after sender approves exchange
+                  if (trip?.receiverPhone && trip?.dropoffOtp) {
+                    fetch('/api/send-delivery-otp', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ receiverPhone: trip.receiverPhone, otp: trip.dropoffOtp }),
+                    }).catch(err => console.error('Failed to send delivery OTP:', err));
+                  }
                 } catch (e) { console.error(e); alert('Failed to approve'); }
                 finally { setIsSubmittingQc(false); }
               }}

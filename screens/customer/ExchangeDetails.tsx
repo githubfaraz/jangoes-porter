@@ -16,6 +16,7 @@ const ExchangeDetails: React.FC = () => {
   const [newQcItem, setNewQcItem] = useState('');
   const [weight, setWeight] = useState('');
   const [weightUnit, setWeightUnit] = useState<'g' | 'kg'>('g');
+  const [productCost, setProductCost] = useState('');
   const [productAPhotos, setProductAPhotos] = useState<string[]>([]);
   const [productBPhotos, setProductBPhotos] = useState<string[]>([]);
   const [uploading, setUploading] = useState(false);
@@ -47,6 +48,7 @@ const ExchangeDetails: React.FC = () => {
         serviceType: 'exchange',
         exchange: { productA, productB, qcRequired, qcItems: qcRequired ? qcItems : [], productAPhotos, productBPhotos },
         dimensions: { chargeableWeight: weightUnit === 'g' ? parseFloat(weight) / 1000 : parseFloat(weight), estimatedCost: 0 },
+        productCost: parseFloat(productCost) || 0,
       },
     });
   };
@@ -330,6 +332,26 @@ const ExchangeDetails: React.FC = () => {
             <span className="material-symbols-outlined text-xs">info</span>
             Combined weight of both items. Used for fare calculation.
           </p>
+        </div>
+
+        {/* Product Cost */}
+        <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 border border-slate-100 dark:border-slate-700 shadow-sm flex flex-col gap-3">
+          <div className="flex items-center gap-2">
+            <span className="material-symbols-outlined text-primary text-lg">currency_rupee</span>
+            <span className="text-sm font-black text-slate-700 dark:text-slate-200">Product Value (in Rupees)</span>
+          </div>
+          <div className="relative">
+            <span className="absolute left-4 top-1/2 -translate-y-1/2 text-sm font-black text-slate-400">₹</span>
+            <input
+              type="number"
+              inputMode="numeric"
+              value={productCost}
+              onChange={e => setProductCost(e.target.value)}
+              placeholder="0"
+              className="w-full h-14 bg-white dark:bg-slate-900 border-2 border-slate-100 dark:border-slate-700 rounded-2xl pl-10 pr-5 text-base font-bold focus:border-primary transition-all"
+            />
+          </div>
+          <p className="text-[9px] text-slate-400 font-medium ml-1">Declared value for insurance and liability purposes.</p>
         </div>
       </main>
 

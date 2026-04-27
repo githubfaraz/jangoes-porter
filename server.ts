@@ -163,36 +163,51 @@ app.post('/api/distance-matrix', async (req, res) => {
 
 // ─── Send Delivery OTP to Receiver ──────────────────────────────────────────
 app.post('/api/send-delivery-otp', async (req, res) => {
-  const { receiverPhone, otp, senderName } = req.body;
+  const { receiverPhone, otp } = req.body;
   if (!receiverPhone || !otp) return res.status(400).json({ error: 'Missing fields' });
 
   // Clean phone number
   const phone = receiverPhone.replace(/[^0-9]/g, '').slice(-10);
-  if (phone.length !== 10) return res.json({ success: true, demo: true }); // skip if invalid
+  if (phone.length !== 10) return res.json({ success: true, demo: true });
 
   const smsUkey = (process.env.SMS_UKEY || "").replace(/^"(.*)"$/, '$1').trim();
   const smsSender = (process.env.SMS_SENDER || "").replace(/^"(.*)"$/, '$1').trim();
+  const smsTemplateId = (process.env.SMS_TEMPLATE_ID || "").replace(/^"(.*)"$/, '$1').trim();
+  const smsDltTemplateId = (process.env.SMS_DLT_TEMPLATE_ID || "").replace(/^"(.*)"$/, '$1').trim();
+  const smsCreditType = (process.env.SMS_CREDIT_TYPE || "7").replace(/^"(.*)"$/, '$1').trim();
 
-  if (!smsUkey || !smsSender) {
+  if (!smsUkey || !smsSender || !smsTemplateId) {
     console.log(`[DEMO] Delivery OTP for ${phone}: ${otp}`);
     return res.json({ success: true, demo: true, otp });
   }
 
   try {
-    const message = `Your delivery OTP is ${otp}. Share this with the driver to receive your parcel from ${senderName || 'Jangoes Porter'}. Do not share with anyone else.`;
-    // Use the same SMS API
+    // Use the same template-based POST API as auth OTP (DLT compliant)
     const payload = {
-      filetype: 1, language: 0, credittype: 7,
+      filetype: 1,
+      language: 0,
+      credittype: Number(smsCreditType) || 2,
       senderid: smsSender,
-      message,
-      number: phone,
+      templateid: Number(smsTemplateId),
+      ukey: smsUkey,
+      isrefno: true,
+      dlttemplateid: Number(smsDltTemplateId),
+      msisdnlist: [{ phoneno: phone, arg1: otp }],
     };
-    const smsRes = await axios.get('https://www.voicensms.in/api/sms-api.php', {
-      params: { ...payload, ukey: smsUkey },
-      timeout: 8000,
-    });
-    console.log(`[SMS] Delivery OTP sent to ${phone}:`, smsRes.data);
-    res.json({ success: true });
+
+    const smsRes = await axios.post(
+      "https://api.voicensms.in/SMSAPI/webresources/CreateSMSCampaignPost",
+      payload,
+      { timeout: 10000, headers: { 'Content-Type': 'application/json' } }
+    );
+
+    console.log(`[SMS] Delivery OTP sent to ${phone}:`, JSON.stringify(smsRes.data));
+    if (smsRes.data?.status === 'success' || smsRes.data?.status === 'Success') {
+      res.json({ success: true });
+    } else {
+      console.error('[SMS] Delivery OTP API error:', JSON.stringify(smsRes.data));
+      res.json({ success: true, demo: true, otp });
+    }
   } catch (err: any) {
     console.error('[SMS] Delivery OTP failed:', err.message);
     console.log(`[DEMO] Delivery OTP for ${phone}: ${otp}`);
