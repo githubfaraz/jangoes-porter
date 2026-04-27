@@ -19,19 +19,24 @@ const ExchangeDetails: React.FC = () => {
   const [productCost, setProductCost] = useState('');
   const [productAPhotos, setProductAPhotos] = useState<string[]>([]);
   const [productBPhotos, setProductBPhotos] = useState<string[]>([]);
-  const [uploading, setUploading] = useState(false);
+  const [uploadingA, setUploadingA] = useState(false);
+  const [uploadingB, setUploadingB] = useState(false);
   const photoInputARef = useRef<HTMLInputElement>(null);
   const photoInputBRef = useRef<HTMLInputElement>(null);
 
-  const handlePhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>, setPhotos: React.Dispatch<React.SetStateAction<string[]>>) => {
+  const handlePhotoUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    setPhotos: React.Dispatch<React.SetStateAction<string[]>>,
+    setBusy: React.Dispatch<React.SetStateAction<boolean>>,
+  ) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setUploading(true);
+    setBusy(true);
     try {
       const url = await uploadToCloudinary(file, 'exchange-reference');
       setPhotos(prev => [...prev, url]);
     } catch { alert('Photo upload failed.'); }
-    finally { setUploading(false); e.target.value = ''; }
+    finally { setBusy(false); e.target.value = ''; }
   };
 
   const isFormValid =
@@ -132,14 +137,22 @@ const ExchangeDetails: React.FC = () => {
             {/* Reference photo upload */}
             <div className="flex flex-col gap-2">
               <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Reference Photo (optional)</span>
-              <input ref={photoInputARef} type="file" accept="image/*" className="hidden" onChange={e => handlePhotoUpload(e, setProductAPhotos)} />
-              <div className="flex gap-2 flex-wrap">
+              <input ref={photoInputARef} type="file" accept="image/*" className="hidden" onChange={e => handlePhotoUpload(e, setProductAPhotos, setUploadingA)} />
+              <div className="flex gap-2 flex-wrap items-center">
                 {productAPhotos.map((url, i) => <img key={i} src={url} className="size-14 rounded-xl object-cover border" alt="" />)}
-                {productAPhotos.length < 3 && (
-                  <button onClick={() => photoInputARef.current?.click()} disabled={uploading}
-                    className="size-14 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-300 disabled:opacity-50">
+                {uploadingA && (
+                  <div className="size-14 rounded-xl border-2 border-primary/30 bg-primary/5 flex items-center justify-center">
+                    <span className="material-symbols-outlined text-primary text-xl animate-spin">sync</span>
+                  </div>
+                )}
+                {!uploadingA && productAPhotos.length < 3 && (
+                  <button onClick={() => photoInputARef.current?.click()}
+                    className="size-14 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-300">
                     <span className="material-symbols-outlined text-xl">add_a_photo</span>
                   </button>
+                )}
+                {uploadingA && (
+                  <span className="text-[10px] font-bold text-primary animate-pulse ml-1">Uploading…</span>
                 )}
               </div>
             </div>
@@ -186,14 +199,22 @@ const ExchangeDetails: React.FC = () => {
             {/* Reference photo upload */}
             <div className="flex flex-col gap-2">
               <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Reference Photo (optional)</span>
-              <input ref={photoInputBRef} type="file" accept="image/*" className="hidden" onChange={e => handlePhotoUpload(e, setProductBPhotos)} />
-              <div className="flex gap-2 flex-wrap">
+              <input ref={photoInputBRef} type="file" accept="image/*" className="hidden" onChange={e => handlePhotoUpload(e, setProductBPhotos, setUploadingB)} />
+              <div className="flex gap-2 flex-wrap items-center">
                 {productBPhotos.map((url, i) => <img key={i} src={url} className="size-14 rounded-xl object-cover border" alt="" />)}
-                {productBPhotos.length < 3 && (
-                  <button onClick={() => photoInputBRef.current?.click()} disabled={uploading}
-                    className="size-14 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-300 disabled:opacity-50">
+                {uploadingB && (
+                  <div className="size-14 rounded-xl border-2 border-emerald-500/30 bg-emerald-500/5 flex items-center justify-center">
+                    <span className="material-symbols-outlined text-emerald-500 text-xl animate-spin">sync</span>
+                  </div>
+                )}
+                {!uploadingB && productBPhotos.length < 3 && (
+                  <button onClick={() => photoInputBRef.current?.click()}
+                    className="size-14 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-300">
                     <span className="material-symbols-outlined text-xl">add_a_photo</span>
                   </button>
+                )}
+                {uploadingB && (
+                  <span className="text-[10px] font-bold text-emerald-500 animate-pulse ml-1">Uploading…</span>
                 )}
               </div>
             </div>
