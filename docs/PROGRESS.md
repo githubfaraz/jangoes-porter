@@ -36,6 +36,38 @@ Notes on the fields:
 
 ---
 
+## 2026-04-27 — Exchange flow: post-QC handover OTP + 3-leg history + driver payouts wired
+
+**Done**
+- Committed in-flight Exchange work as baseline (`c4834d5`): customer ExchangeDetails (Product A/B + QC checklist + product cost), driver state machine (`ExchangeTrip.tsx`), Tracking QC review screen, driver GPS tracking, `/api/send-delivery-otp`, `/api/driver-info`, `/api/deduct-fare`, `/api/validate-fare`, Surepass KYC routes.
+- **Req #1 (product cost on Exchange):** confirmed already done in `ExchangeDetails.tsx`.
+- **Req #2 (OTP after sender QC approval):** removed early OTP send at `ARRIVED_AT_RECEIVER` and removed the OTP-verify block + Product A handover preview at receiver arrival. The OTP is now only sent when the customer approves QC (already wired in `Tracking.tsx` lines 282-289). Reusing existing `/api/send-delivery-otp` template per user direction (no new DLT template registered).
+- **Req #3 (driver post-QC UI):** replaced `QC_APPROVED` screen with: heading "QC of product is approved. Now handover the new product" + Product A image preview + handover OTP input + "HANDOVER COMPLETED" button + "Resend OTP" link. On valid OTP → `RETURNING_PRODUCT_B`. Uses existing `dropoffOtp` field as the handover OTP.
+- **Req #4 (3-leg history for Exchange):** `OrderHistory.tsx` was already wired to Firestore (auto-memory was stale). Added 3-leg display for `serviceType === 'exchange'` trips: Leg 1 (Pickup Product A), Leg 2 (Exchange at Receiver), Leg 3 (Return to Sender). Non-exchange trips keep the original 2-point pickup→drop view.
+- **Req #5 (driver transaction/earning history):** rewrote `Payouts.tsx` from scratch. Now queries `trips where driverId == auth.uid`, filters `COMPLETED`/`EXCHANGE_COMPLETED`/`EXCHANGE_FAILED`, computes total/today/this-week earnings live, lists each trip as a transaction row with icon (swap for exchange, truck for delivery, amber for failed exchange). No transactions collection exists yet — earnings derived from trip fares.
+
+**In progress**
+- _(none — all five requested changes shipped)_
+
+**Next**
+- User testing of the new Exchange flow (post-QC handover OTP path) end-to-end.
+- Eventually: register a DLT template that matches the desired SMS body "Your exchange is completed, please share the OTP for new product delivery" — currently the receiver receives the existing generic delivery-OTP template body.
+- Eventually: real withdrawal/payout collection so Payouts can show "available balance" separately from "total earned".
+
+**Open questions**
+- _(none)_
+
+**Files touched**
+- `screens/driver/ExchangeTrip.tsx` — removed early receiver-OTP/handover; new QC_APPROVED handover screen
+- `screens/shared/OrderHistory.tsx` — 3-leg display for exchange trips
+- `screens/driver/Payouts.tsx` — full rewrite, Firestore-wired
+- `docs/PROGRESS.md` — this entry
+
+**Notes / drift from earlier PROGRESS**
+- `OrderHistory.tsx` was listed as "hardcoded mocks" in earlier PROGRESS and auto-memory. **It's actually fully wired to Firestore already** — that note was stale. Auto-memory updated.
+
+---
+
 ## 2026-04-27 — Session-sync system bootstrapped; current state snapshot
 
 **Done**

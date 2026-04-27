@@ -152,17 +152,44 @@ const OrderHistory: React.FC = () => {
                 </span>
               </div>
 
-              <div className="flex flex-col gap-3 relative pl-1 mb-3">
-                <div className="absolute left-[5px] top-2 bottom-2 w-0.5 bg-slate-100 dark:bg-slate-800"></div>
-                <div className="flex items-start gap-3 relative">
-                  <div className="size-3 rounded-full bg-green-500 shrink-0 z-10 mt-0.5 ring-2 ring-white dark:ring-slate-900"></div>
-                  <span className="text-sm font-bold text-slate-900 dark:text-white truncate">{trip.pickup?.address || 'Pickup'}</span>
+              {trip.serviceType === 'exchange' ? (
+                <div className="flex flex-col gap-3 relative pl-1 mb-3">
+                  <div className="absolute left-[5px] top-2 bottom-2 w-0.5 bg-slate-100 dark:bg-slate-800"></div>
+                  <div className="flex items-start gap-3 relative">
+                    <div className="size-3 rounded-full bg-green-500 shrink-0 z-10 mt-0.5 ring-2 ring-white dark:ring-slate-900"></div>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Leg 1 — Pickup Product A</span>
+                      <span className="text-sm font-bold text-slate-900 dark:text-white truncate">{trip.pickup?.address || 'Pickup'}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3 relative">
+                    <div className="size-3 rounded-full bg-amber-500 shrink-0 z-10 mt-0.5 ring-2 ring-white dark:ring-slate-900"></div>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Leg 2 — Exchange at Receiver</span>
+                      <span className="text-sm font-bold text-slate-900 dark:text-white truncate">{trip.dropoff?.address || 'Receiver'}</span>
+                    </div>
+                  </div>
+                  <div className="flex items-start gap-3 relative">
+                    <div className="size-3 rounded-full bg-blue-500 shrink-0 z-10 mt-0.5 ring-2 ring-white dark:ring-slate-900"></div>
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Leg 3 — Return to Sender</span>
+                      <span className="text-sm font-bold text-slate-900 dark:text-white truncate">{trip.pickup?.address || 'Sender'}</span>
+                    </div>
+                  </div>
                 </div>
-                <div className="flex items-start gap-3 relative">
-                  <div className="size-3 rounded-full bg-red-500 shrink-0 z-10 mt-0.5 ring-2 ring-white dark:ring-slate-900"></div>
-                  <span className="text-sm font-bold text-slate-900 dark:text-white truncate">{trip.dropoff?.address || 'Drop'}</span>
+              ) : (
+                <div className="flex flex-col gap-3 relative pl-1 mb-3">
+                  <div className="absolute left-[5px] top-2 bottom-2 w-0.5 bg-slate-100 dark:bg-slate-800"></div>
+                  <div className="flex items-start gap-3 relative">
+                    <div className="size-3 rounded-full bg-green-500 shrink-0 z-10 mt-0.5 ring-2 ring-white dark:ring-slate-900"></div>
+                    <span className="text-sm font-bold text-slate-900 dark:text-white truncate">{trip.pickup?.address || 'Pickup'}</span>
+                  </div>
+                  <div className="flex items-start gap-3 relative">
+                    <div className="size-3 rounded-full bg-red-500 shrink-0 z-10 mt-0.5 ring-2 ring-white dark:ring-slate-900"></div>
+                    <span className="text-sm font-bold text-slate-900 dark:text-white truncate">{trip.dropoff?.address || 'Drop'}</span>
+                  </div>
                 </div>
-              </div>
+              )}
 
               <div className="flex items-center justify-between pt-2 border-t border-slate-50 dark:border-slate-800">
                 <span className="text-xs text-slate-400 font-medium">{formatDate(trip.createdAt)}</span>
