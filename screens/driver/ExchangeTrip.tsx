@@ -18,6 +18,9 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
   const [pickupPinInput, setPickupPinInput] = useState('');
   const [productAImage, setProductAImage] = useState<string | null>(null);
   const [productBImage, setProductBImage] = useState<string | null>(null);
+  const [uploadingProductA, setUploadingProductA] = useState(false);
+  const [uploadingProductB, setUploadingProductB] = useState(false);
+  const [uploadingQc, setUploadingQc] = useState(false);
   const [handoverOtpInput, setHandoverOtpInput] = useState('');
   const [returnOtpInput, setReturnOtpInput] = useState('');
   const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
@@ -55,26 +58,31 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
     finally { setLoading(false); }
   };
 
-  const handleImageUpload = async (e: React.ChangeEvent<HTMLInputElement>, setImage: (url: string) => void, folder: string) => {
+  const handleImageUpload = async (
+    e: React.ChangeEvent<HTMLInputElement>,
+    setImage: (url: string) => void,
+    folder: string,
+    setBusy: React.Dispatch<React.SetStateAction<boolean>>,
+  ) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setLoading(true);
+    setBusy(true);
     try {
       const url = await uploadToCloudinary(file, `trips/${tripId}/${folder}`);
       setImage(url);
     } catch { alert('Image upload failed.'); }
-    finally { setLoading(false); e.target.value = ''; }
+    finally { setBusy(false); e.target.value = ''; }
   };
 
   const handleQcPhotoUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
-    setLoading(true);
+    setUploadingQc(true);
     try {
       const url = await uploadToCloudinary(file, `trips/${tripId}/qc`);
       setQcPhotos(prev => [...prev, url]);
     } catch { alert('Upload failed.'); }
-    finally { setLoading(false); e.target.value = ''; }
+    finally { setUploadingQc(false); e.target.value = ''; }
   };
 
   const sendReceiverOtp = () => {
@@ -170,10 +178,15 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
           <div className="flex flex-col gap-2">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Photo of Product A (mandatory)</label>
             <input ref={imageInputRef} type="file" accept="image/*" capture="environment" className="hidden"
-              onChange={e => handleImageUpload(e, setProductAImage, 'product-a')} />
+              onChange={e => handleImageUpload(e, setProductAImage, 'product-a', setUploadingProductA)} />
             {productAImage ? (
               <div className="relative rounded-2xl overflow-hidden border-2 border-slate-100 h-40">
                 <img src={productAImage} className="w-full h-full object-cover" alt="Product A" />
+              </div>
+            ) : uploadingProductA ? (
+              <div className="w-full h-32 rounded-2xl border-2 border-dashed border-primary/30 bg-primary/5 flex flex-col items-center justify-center gap-2 text-primary">
+                <span className="material-symbols-outlined text-3xl animate-spin">sync</span>
+                <span className="text-xs font-bold animate-pulse">Uploading…</span>
               </div>
             ) : (
               <button onClick={() => imageInputRef.current?.click()} disabled={loading}
@@ -259,10 +272,15 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
           <div className="flex flex-col gap-2">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Photo of Product B</label>
             <input ref={imageInputRef} type="file" accept="image/*" capture="environment" className="hidden"
-              onChange={e => handleImageUpload(e, setProductBImage, 'product-b')} />
+              onChange={e => handleImageUpload(e, setProductBImage, 'product-b', setUploadingProductB)} />
             {productBImage ? (
               <div className="relative rounded-2xl overflow-hidden border-2 border-slate-100 h-40">
                 <img src={productBImage} className="w-full h-full object-cover" alt="Product B" />
+              </div>
+            ) : uploadingProductB ? (
+              <div className="w-full h-32 rounded-2xl border-2 border-dashed border-emerald-500/30 bg-emerald-500/5 flex flex-col items-center justify-center gap-2 text-emerald-500">
+                <span className="material-symbols-outlined text-3xl animate-spin">sync</span>
+                <span className="text-xs font-bold animate-pulse">Uploading…</span>
               </div>
             ) : (
               <button onClick={() => imageInputRef.current?.click()} disabled={loading}
@@ -320,12 +338,22 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
               <div className="flex flex-col gap-2">
                 <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">QC Photos (optional)</label>
                 <input ref={qcInputRef} type="file" accept="image/*" capture="environment" className="hidden" onChange={handleQcPhotoUpload} />
-                <div className="flex gap-2 flex-wrap">
+                <div className="flex gap-2 flex-wrap items-center">
                   {qcPhotos.map((url, i) => <img key={i} src={url} className="size-16 rounded-xl object-cover border" alt="" />)}
-                  <button onClick={() => qcInputRef.current?.click()} disabled={loading}
-                    className="size-16 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-300">
-                    <span className="material-symbols-outlined">add</span>
-                  </button>
+                  {uploadingQc && (
+                    <div className="size-16 rounded-xl border-2 border-amber-400/40 bg-amber-50 flex items-center justify-center">
+                      <span className="material-symbols-outlined text-amber-500 text-xl animate-spin">sync</span>
+                    </div>
+                  )}
+                  {!uploadingQc && (
+                    <button onClick={() => qcInputRef.current?.click()} disabled={loading}
+                      className="size-16 border-2 border-dashed border-slate-200 rounded-xl flex items-center justify-center text-slate-300">
+                      <span className="material-symbols-outlined">add</span>
+                    </button>
+                  )}
+                  {uploadingQc && (
+                    <span className="text-[10px] font-bold text-amber-600 animate-pulse ml-1">Uploading…</span>
+                  )}
                 </div>
               </div>
               <button onClick={() => {
