@@ -1,4 +1,4 @@
-# Jangoes Porter — Product Specification
+# Product Specification — On-Demand Hyperlocal Logistics Platform
 
 **Prepared for:** Prospective clients, partners, investors
 **Document type:** Product overview & capability specification
@@ -8,9 +8,9 @@
 
 ## 1. Executive Summary
 
-**Jangoes Porter** is a mobile-first, AI-assisted on-demand logistics platform that connects customers with verified drivers across India. Customers book parcel pickups, returns, or two-way item exchanges in seconds; drivers accept matching jobs, complete them under a verified flow, and receive transparent earnings.
+**The Platform** is a mobile-first, AI-assisted on-demand logistics platform that connects customers with verified drivers across India. Customers book parcel pickups, returns, or two-way item exchanges in seconds; drivers accept matching jobs, complete them under a verified flow, and receive transparent earnings.
 
-Where ride-hailing solved how people move, Jangoes Porter solves how *things* move — at the same speed and the same level of polish.
+Where ride-hailing solved how people move, the Platform solves how *things* move — at the same speed and the same level of polish.
 
 **Key facts**
 
@@ -35,7 +35,7 @@ Where ride-hailing solved how people move, Jangoes Porter solves how *things* mo
 Hyper-local logistics in India is fragmented. Customers either rely on informal porter networks with no accountability, or large couriers with rigid pickup windows and opaque pricing. Returning items, swapping items, or sending an unusual load is a particular gap.
 
 ### Our approach
-Three commitments shape every screen of Jangoes Porter:
+Three commitments shape every screen of the Platform:
 
 1. **One job, one flow.** Each step of a booking is a focused screen: choose locations, describe the parcel, pick a vehicle, confirm. No forms-within-forms, no scrolling through paperwork.
 2. **Verified at every handoff.** Pickup PINs, delivery OTPs, KYC-verified drivers, and (for exchanges) sender-approved Quality Checks ensure both sides know exactly who they are dealing with at every step.
@@ -44,7 +44,7 @@ Three commitments shape every screen of Jangoes Porter:
 ### Differentiators
 - **Exchange service** — a true two-way trip (deliver Item A, return Item B) with sender-controlled Quality Check, an industry first for this segment in India.
 - **AI-augmented booking** — Gemini classifies the parcel from a description and a photo; weight, fragility, and category are populated automatically.
-- **Premium "Liquid Glass" interface** — a fintech-grade visual language differentiates Jangoes from utilitarian competitors and signals trust to first-time users.
+- **Premium "Liquid Glass" interface** — a fintech-grade visual language differentiates the Platform from utilitarian competitors and signals trust to first-time users.
 - **End-to-end driver verification** — eight-step KYC including Aadhaar OCR, PAN OCR, Driving License (Surepass), Vehicle RC, vehicle photographs, and selfie face-match.
 
 ---
@@ -273,7 +273,7 @@ A high-level summary suitable for technical due diligence; not a code-level spec
 
 ## 9. Brand & Visual Identity
 
-The Jangoes Porter interface uses a custom design system named **"Liquid Glass & Aero-Mesh"**:
+The Platform's interface uses a custom design system named **"Liquid Glass & Aero-Mesh"**:
 
 - High-vibrancy light theme with animated mesh gradients (blue / purple / green)
 - Frosted-glass containers, soft shadows, large rounded corners (24–40 px)
@@ -282,7 +282,7 @@ The Jangoes Porter interface uses a custom design system named **"Liquid Glass &
 - Mobile-first 448 px max-width with bottom navigation; bottom nav contextually hidden during focus flows (booking funnel, KYC, active trip)
 - Dark mode supported
 
-The visual language is a deliberate departure from utilitarian logistics interfaces — Jangoes presents as fintech-grade, building trust with first-time users and supporting premium pricing positioning.
+The visual language is a deliberate departure from utilitarian logistics interfaces — the Platform presents as fintech-grade, building trust with first-time users and supporting premium pricing positioning.
 
 ---
 
@@ -324,8 +324,8 @@ The visual language is a deliberate departure from utilitarian logistics interfa
 - Apple Sign-In activation
 
 **Phase 2 — Live Logistics**
-- Voice-activated booking ("Hey Jangoes, send a laptop from home")
-- Multi-stop route optimisation for "Jangoes Pro" drivers
+- Voice-activated booking (e.g., "send a laptop from home")
+- Multi-stop route optimisation for premium-tier drivers
 - Real-time traffic-aware ETA adjustments
 
 **Phase 3 — Enterprise & Scale**
@@ -363,10 +363,10 @@ The visual language is a deliberate departure from utilitarian logistics interfa
 
 We welcome engagement under any of the following models:
 
-- **White-label deployment** — Jangoes Porter rebranded for your brand, deployed on your infrastructure, with custom geography and fare configuration.
-- **API / aggregator integration** — Use Jangoes Porter as the fulfilment layer for your existing customer-facing app or marketplace.
+- **White-label deployment** — the Platform rebranded for your brand, deployed on your infrastructure, with custom geography and fare configuration.
+- **API / aggregator integration** — Use the Platform as the fulfilment layer for your existing customer-facing app or marketplace.
 - **Joint venture** — Co-launch in a new market with shared operations and revenue.
-- **Strategic investment** — Equity participation in Jangoes Porter's expansion roadmap.
+- **Strategic investment** — Equity participation in the Platform's expansion roadmap.
 
 ---
 
@@ -382,7 +382,7 @@ We welcome engagement under any of the following models:
 | **DLT** | Distributed Ledger Technology (TRAI mandate for Indian SMS templates) |
 | **SAC 9965** | Service Accounting Code for Goods Transport by Road (GST classification) |
 | **Surepass** | KYC verification provider used for Aadhaar / PAN / DL / RC checks |
-| **Liquid Glass** | Jangoes Porter's design system — frosted glass on aero-mesh gradients |
+| **Liquid Glass** | The Platform's design system — frosted glass on aero-mesh gradients |
 
 ---
 
@@ -397,4 +397,4 @@ For deeper detail on specific subsystems:
 
 ---
 
-*Jangoes Porter is built and operated with a long-term commitment to driver welfare, customer trust, and operational excellence. We welcome the opportunity to discuss how this platform can serve your goals.*
+*The Platform is built and operated with a long-term commitment to driver welfare, customer trust, and operational excellence. We welcome the opportunity to discuss how it can serve your goals.*
