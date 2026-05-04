@@ -17,6 +17,7 @@ const VehicleSelection: React.FC = () => {
   const [loadingFares, setLoadingFares] = useState(true);
   const [availableCategories, setAvailableCategories] = useState<Record<string, number>>({});
   const [loadingAvailability, setLoadingAvailability] = useState(true);
+  const [availabilityFailed, setAvailabilityFailed] = useState(false);
   const [enabledVehicles, setEnabledVehicles] = useState<Record<string, boolean>>({});
 
   const [walletBalance, setWalletBalance] = useState(0);
@@ -43,19 +44,30 @@ const VehicleSelection: React.FC = () => {
   useEffect(() => {
     async function checkAvailability() {
       try {
-        const [availRes, settings] = await Promise.all([
-          fetch('/api/driver-availability').then(r => r.json()),
+        const [availResponse, settings] = await Promise.all([
+          fetch('/api/driver-availability'),
           loadAppSettings(),
         ]);
-        const counts: Record<string, number> = availRes.counts || {};
-        setAvailableCategories(counts);
         setEnabledVehicles(settings.vehicles || {});
         const visibleVehicles = VEHICLE_TYPES.filter(v => (settings.vehicles || {})[v.id] !== false);
+
+        if (!availResponse.ok) {
+          // Backend/network failure — don't show "No drivers nearby" badges
+          // (they'd misrepresent a transient outage as zero supply).
+          setAvailabilityFailed(true);
+          if (visibleVehicles.length > 0) setSelected(visibleVehicles[0].id);
+          return;
+        }
+
+        const availJson = await availResponse.json();
+        const counts: Record<string, number> = availJson.counts || {};
+        setAvailableCategories(counts);
         const firstAvailable = visibleVehicles.find(v => counts[v.id] && counts[v.id] > 0);
         if (firstAvailable) setSelected(firstAvailable.id);
         else if (visibleVehicles.length > 0) setSelected(visibleVehicles[0].id);
       } catch (err) {
         console.error('Error checking driver availability:', err);
+        setAvailabilityFailed(true);
       } finally {
         setLoadingAvailability(false);
       }
@@ -159,7 +171,7 @@ const VehicleSelection: React.FC = () => {
           <div className="px-5 pt-1 pb-3 flex items-center justify-between">
             <div>
               <h2 className="text-lg font-bold">Select a vehicle</h2>
-              <p className="text-xs text-slate-500">Available vehicles for your items</p>
+              <p className="text-xs text-slate-500">{availabilityFailed ? "Couldn't check driver availability" : 'Available vehicles for your items'}</p>
             </div>
             {loadingFares && (
               <div className="flex items-center gap-1.5 text-primary">
@@ -173,7 +185,9 @@ const VehicleSelection: React.FC = () => {
             {VEHICLE_TYPES.filter(v => enabledVehicles[v.id] !== false).map((v) => {
               const driverCount = availableCategories[v.id] || 0;
               const isAvailable = driverCount > 0;
-              const noDriversYet = !loadingAvailability && !isAvailable;
+              // Suppress "No drivers nearby" when the availability check itself
+              // failed — we don't actually know whether drivers exist.
+              const noDriversYet = !loadingAvailability && !availabilityFailed && !isAvailable;
               return (
               <button
                 key={v.id}

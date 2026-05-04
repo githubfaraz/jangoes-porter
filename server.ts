@@ -296,8 +296,12 @@ app.post('/api/deduct-fare', async (req, res) => {
 // ─── Driver Availability Endpoint ────────────────────────────────────────────
 app.get('/api/driver-availability', async (_req, res) => {
   try {
+    // `roles` is the durable list of roles the user has registered for; `role`
+    // is the active view, which flips when the user toggles between Driver and
+    // Customer. Use the array so a driver who's currently viewing as Customer
+    // still gets counted.
     const snap = await admin.firestore().collection('users')
-      .where('role', '==', 'DRIVER')
+      .where('roles', 'array-contains', 'DRIVER')
       .where('kycCompleted', '==', true)
       .get();
     const counts: Record<string, number> = {};
@@ -310,7 +314,9 @@ app.get('/api/driver-availability', async (_req, res) => {
     res.json({ counts });
   } catch (err: any) {
     console.error('[DriverAvailability]', err.message);
-    res.json({ counts: {} });
+    // Return 503 (not an empty `counts`) so the client can distinguish a
+    // backend/network failure from a genuine "0 drivers in every category".
+    res.status(503).json({ error: 'availability_unavailable', message: err.message });
   }
 });
 
