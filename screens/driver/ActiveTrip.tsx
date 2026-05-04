@@ -30,6 +30,7 @@ const ActiveTrip: React.FC = () => {
   const [parcelImage, setParcelImage] = useState<string | null>(null);
   const [isUploadingParcel, setIsUploadingParcel] = useState(false);
   const [showNotification, setShowNotification] = useState<{title: string, message: string} | null>(null);
+  const [fullScreenImage, setFullScreenImage] = useState<string | null>(null);
   const parcelInputRef = useRef<HTMLInputElement>(null);
 
   // Real customer info
@@ -555,6 +556,22 @@ const ActiveTrip: React.FC = () => {
                   <p className="text-xs font-bold text-green-600 uppercase tracking-widest">Ready to Deliver</p>
                 </div>
 
+                {/* Parcel image you captured at pickup — verify before handing over */}
+                {trip?.parcelImageUrl && (
+                  <div className="bg-blue-50 dark:bg-primary/10 rounded-2xl p-3 border border-primary/20">
+                    <p className="text-[10px] font-black text-primary uppercase tracking-widest mb-2">Parcel you picked up</p>
+                    <button
+                      type="button"
+                      onClick={() => setFullScreenImage(trip.parcelImageUrl!)}
+                      aria-label="Open parcel image"
+                      className="w-full h-32 rounded-xl overflow-hidden border border-slate-200 dark:border-slate-700 active:scale-[0.99] transition-transform"
+                    >
+                      <img src={trip.parcelImageUrl} className="w-full h-full object-cover" alt="Parcel captured at pickup" />
+                    </button>
+                    <p className="text-[10px] text-slate-500 mt-1.5">Tap to enlarge. Verify the parcel matches before handing over.</p>
+                  </div>
+                )}
+
                 <div className="flex items-center gap-4">
                   <div className="size-10 rounded-full bg-slate-200 dark:bg-slate-700 flex items-center justify-center shrink-0">
                     <span className="material-symbols-outlined text-slate-400">person</span>
@@ -690,6 +707,22 @@ const ActiveTrip: React.FC = () => {
         </div>
       )}
 
+      {/* Full-screen image viewer (parcel preview at dropoff) */}
+      {fullScreenImage && (
+        <div
+          className="fixed inset-0 z-[200] bg-black/90 flex items-center justify-center animate-in fade-in duration-200"
+          onClick={() => setFullScreenImage(null)}
+        >
+          <button
+            className="absolute top-4 right-4 p-2 text-white/80 hover:text-white"
+            onClick={() => setFullScreenImage(null)}
+            aria-label="Close image"
+          >
+            <span className="material-symbols-outlined text-3xl">close</span>
+          </button>
+          <img src={fullScreenImage} alt="Parcel" className="max-w-full max-h-full object-contain p-4" />
+        </div>
+      )}
     </div>
   );
 };

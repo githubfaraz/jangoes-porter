@@ -97,13 +97,13 @@ const ExchangeDetails: React.FC = () => {
           </div>
         </div>
 
-        {/* Product A Card */}
+        {/* Product 'A' Card */}
         <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 border border-primary/20 shadow-xl shadow-primary/5 flex flex-col gap-5">
           <div className="flex items-center gap-2">
             <div className="size-6 bg-primary/10 rounded-lg flex items-center justify-center">
               <span className="material-symbols-outlined text-primary text-sm filled">upload</span>
             </div>
-            <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Product A — You're Sending</h3>
+            <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Product 'A' — You're Sending</h3>
           </div>
 
           <div className="flex flex-col gap-4">
@@ -159,13 +159,13 @@ const ExchangeDetails: React.FC = () => {
           </div>
         </div>
 
-        {/* Product B Card */}
+        {/* Product 'B' Card */}
         <div className="bg-white dark:bg-slate-800 rounded-3xl p-6 border border-emerald-500/20 shadow-xl shadow-emerald-500/5 flex flex-col gap-5">
           <div className="flex items-center gap-2">
             <div className="size-6 bg-emerald-500/10 rounded-lg flex items-center justify-center">
               <span className="material-symbols-outlined text-emerald-500 text-sm filled">download</span>
             </div>
-            <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Product B — You Want Back</h3>
+            <h3 className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Product 'B' — You Want Back</h3>
           </div>
 
           <div className="flex flex-col gap-4">
@@ -250,7 +250,7 @@ const ExchangeDetails: React.FC = () => {
           {qcRequired && (
             <div className="flex flex-col gap-3 animate-in fade-in slide-in-from-top-2 duration-300">
               <span className="text-[9px] font-black text-amber-600 uppercase tracking-widest ml-1">QC Checklist</span>
-              <p className="text-xs text-slate-400 font-medium ml-1">Add items the driver must verify before accepting Product B.</p>
+              <p className="text-xs text-slate-400 font-medium ml-1">Add items the driver must verify before accepting Product 'B'.</p>
 
               {/* Existing QC items */}
               {qcItems.length > 0 && (
@@ -308,7 +308,7 @@ const ExchangeDetails: React.FC = () => {
 
               <p className="text-[9px] text-amber-500 font-bold ml-1 flex items-center gap-1">
                 <span className="material-symbols-outlined text-xs">info</span>
-                Driver must check all items before collecting Product B.
+                Driver must check all items before collecting Product 'B'.
               </p>
             </div>
           )}

@@ -1,9 +1,9 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { db, auth } from '../../src/firebase.ts';
-import { collection, query, where, onSnapshot, doc, updateDoc, getDoc } from 'firebase/firestore';
-import { BookingStatus, Trip } from '../../types.ts';
+import { onSnapshot, doc } from 'firebase/firestore';
 import { extractKycData } from '../../services/kycHelper.ts';
+import { useDriverOnline } from '../../src/driverOnline.ts';
 import LocationPermission from '../shared/LocationPermission.tsx';
 
 interface KycData {
@@ -24,11 +24,9 @@ function getPendingDocs(kycData: KycData): string[] {
 }
 
 const DriverDashboard: React.FC = () => {
-  const [isOnline, setIsOnline] = useState(() => {
-    try { return sessionStorage.getItem('driverOnline') === 'true'; } catch { return false; }
-  });
-  const [showRequest, setShowRequest] = useState(false);
-  const [currentRequest, setCurrentRequest] = useState<(Trip & { id: string }) | null>(null);
+  // Online state is shared with the App-level <TripRequestOverlay> via the
+  // useDriverOnline module, so the toggle here flips the popup listener too.
+  const [isOnline, setIsOnline] = useDriverOnline();
   const navigate = useNavigate();
 
   // Driver profile + KYC status (real-time)
@@ -39,15 +37,9 @@ const DriverDashboard: React.FC = () => {
   const [verifiedNotification, setVerifiedNotification] = useState(false);
   const [driverVehicleCategory, setDriverVehicleCategory] = useState('');
   const [isDriverDisabled, setIsDriverDisabled] = useState(false);
-  const [driverLat, setDriverLat] = useState<number | null>(null);
-  const [driverLng, setDriverLng] = useState<number | null>(null);
-  const declinedTripsRef = useRef<Set<string>>(new Set());
   const [locationGranted, setLocationGranted] = useState(false);
   const [showLocationPrompt, setShowLocationPrompt] = useState(false);
-  const geoWatchRef = useRef<number | null>(null);
   const prevPendingRef = useRef<string[]>([]);
-
-  const MAX_RADIUS_KM = 5;
 
   const offers = [
     { id: 1, title: 'Diwali Peak Bonus', desc: 'Get ₹50 extra on every order from 6PM to 10PM today!', color: 'from-orange-500 to-red-600', icon: 'celebration' },
@@ -86,91 +78,10 @@ const DriverDashboard: React.FC = () => {
     return () => unsubscribe();
   }, []);
 
-  // ── Haversine distance in km ──
-  const haversineKm = (lat1: number, lng1: number, lat2: number, lng2: number): number => {
-    const R = 6371;
-    const dLat = (lat2 - lat1) * Math.PI / 180;
-    const dLng = (lng2 - lng1) * Math.PI / 180;
-    const a = Math.sin(dLat / 2) ** 2
-      + Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) * Math.sin(dLng / 2) ** 2;
-    return R * 2 * Math.asin(Math.sqrt(a));
-  };
-
-  // ── Track driver GPS when online ──
-  useEffect(() => {
-    if (!isOnline) {
-      if (geoWatchRef.current !== null) {
-        navigator.geolocation.clearWatch(geoWatchRef.current);
-        geoWatchRef.current = null;
-      }
-      return;
-    }
-    if ('geolocation' in navigator) {
-      geoWatchRef.current = navigator.geolocation.watchPosition(
-        (pos) => {
-          setDriverLat(pos.coords.latitude);
-          setDriverLng(pos.coords.longitude);
-          setLocationGranted(true);
-        },
-        (err) => console.warn('Geolocation error:', err.message),
-        { enableHighAccuracy: true, maximumAge: 10000 }
-      );
-    }
-    return () => {
-      if (geoWatchRef.current !== null) {
-        navigator.geolocation.clearWatch(geoWatchRef.current);
-        geoWatchRef.current = null;
-      }
-    };
-  }, [isOnline]);
-
-  // ── Trip listener — only active when online AND no pending docs ────────────
-  useEffect(() => {
-    console.log('[DASHBOARD] Trip listener check — isOnline:', isOnline, 'pendingDocs:', pendingDocs);
-    if (!isOnline || pendingDocs.length > 0) {
-      setShowRequest(false);
-      setCurrentRequest(null);
-      return;
-    }
-
-    console.log('[DASHBOARD] Trip listener ACTIVE — vehicle:', driverVehicleCategory, 'location:', driverLat, driverLng);
-    const q = query(collection(db, 'trips'), where('status', '==', BookingStatus.SEARCHING));
-    const unsubscribe = onSnapshot(q, (snapshot) => {
-      if (!snapshot.empty) {
-        // Find first trip matching vehicle category, within radius, and not declined
-        const match = snapshot.docs.find(d => {
-          // Skip declined trips
-          if (declinedTripsRef.current.has(d.id)) return false;
-
-          const tripData = d.data();
-          const tripVehicleId = tripData.vehicleId || '';
-
-          // Vehicle category filter
-          if (driverVehicleCategory && tripVehicleId !== driverVehicleCategory) return false;
-
-          // Radius filter — only if driver location is available
-          if (driverLat !== null && driverLng !== null && tripData.pickup?.lat && tripData.pickup?.lng) {
-            const distKm = haversineKm(driverLat, driverLng, tripData.pickup.lat, tripData.pickup.lng);
-            if (distKm > MAX_RADIUS_KM) return false;
-          }
-
-          return true;
-        });
-        if (match) {
-          setCurrentRequest({ ...match.data() as Trip, id: match.id });
-          setShowRequest(true);
-        } else {
-          setShowRequest(false);
-          setCurrentRequest(null);
-        }
-      } else {
-        setShowRequest(false);
-        setCurrentRequest(null);
-      }
-    });
-
-    return () => unsubscribe();
-  }, [isOnline, pendingDocs, driverVehicleCategory, driverLat, driverLng]);
+  // GPS tracking + trip listener + accept/decline UI now live in
+  // <TripRequestOverlay> at the App level so the popup fires on every screen,
+  // not just /dashboard. The toggle below still controls them via the shared
+  // useDriverOnline hook.
 
   const handleToggleOnline = (value: boolean) => {
     if (value && pendingDocs.length > 0) return; // blocked by pending docs
@@ -179,37 +90,18 @@ const DriverDashboard: React.FC = () => {
       return;
     }
     setIsOnline(value);
-    try { sessionStorage.setItem('driverOnline', value ? 'true' : 'false'); } catch {}
-  };
-
-  const handleAcceptRequest = async () => {
-    if (!currentRequest || !auth.currentUser) return;
-    try {
-      await updateDoc(doc(db, 'trips', currentRequest.id), {
-        status: BookingStatus.ACCEPTED,
-        driverId: auth.currentUser.uid,
-        acceptedAt: new Date().toISOString()
-      });
-      setShowRequest(false);
-      navigate('/active-trip', { state: { tripId: currentRequest.id } });
-    } catch (error: any) {
-      console.error("Accept Trip Error:", error?.code, error?.message, error);
-      alert("Failed to accept trip: " + (error?.message || 'Unknown error'));
-    }
   };
 
   const firstName = driverName.split(' ')[0] || 'Driver';
 
-  // Location permission prompt for going online
+  // Location permission prompt for going online — GPS itself is owned by
+  // <TripRequestOverlay> now, so we just record the grant + flip online.
   if (showLocationPrompt) {
     return (
-      <LocationPermission onGranted={(lat, lng) => {
-        setDriverLat(lat);
-        setDriverLng(lng);
+      <LocationPermission onGranted={() => {
         setLocationGranted(true);
         setShowLocationPrompt(false);
         setIsOnline(true);
-        try { sessionStorage.setItem('driverOnline', 'true'); } catch {}
       }}>
         <div />
       </LocationPermission>
@@ -426,78 +318,7 @@ const DriverDashboard: React.FC = () => {
         </div>
       </div>
 
-      {/* Incoming Job Modal */}
-      {showRequest && (
-        <div className="fixed inset-0 z-[100] bg-black/60 backdrop-blur-sm flex items-center justify-center p-6">
-          <div className="w-full max-w-sm bg-white dark:bg-slate-900 rounded-[40px] overflow-hidden shadow-2xl animate-in zoom-in-95 duration-300 flex flex-col">
-            <div className="bg-primary p-8 text-white relative">
-              <div className="flex justify-between items-start mb-6">
-                <div className="flex flex-col">
-                  <span className="text-[10px] font-black uppercase tracking-[0.3em] opacity-80">
-                    {currentRequest?.serviceType === 'exchange' ? 'Exchange Request' : 'New Pickup Request'}
-                  </span>
-                  {currentRequest?.serviceType === 'exchange' && (
-                    <span className="text-[9px] font-black bg-rose-500 text-white px-2 py-0.5 rounded-full mt-1 inline-block">ROUNDTRIP EXCHANGE</span>
-                  )}
-                  <h3 className="text-4xl font-black tracking-tight mt-1">₹{currentRequest?.fare || '450.00'}</h3>
-                </div>
-                <div className="size-14 bg-white/20 rounded-2xl flex items-center justify-center backdrop-blur-md border border-white/20 animate-bounce">
-                  <span className="material-symbols-outlined text-3xl">local_shipping</span>
-                </div>
-              </div>
-              <div className="flex gap-6">
-                <div className="flex flex-col">
-                  <span className="text-[9px] font-black opacity-70 uppercase tracking-widest">Vehicle</span>
-                  <span className="text-sm font-black">{currentRequest?.vehicleType || 'Mini Truck'}</span>
-                </div>
-                <div className="flex flex-col">
-                  <span className="text-[9px] font-black opacity-70 uppercase tracking-widest">Sender</span>
-                  <span className="text-sm font-black">{currentRequest?.senderName || 'Customer'}</span>
-                </div>
-              </div>
-            </div>
-
-            <div className="p-8 flex flex-col gap-8">
-              <div className="flex flex-col gap-6 relative">
-                <div className="absolute left-[7px] top-2 bottom-2 w-0.5 bg-slate-100 dark:bg-slate-800 border-l border-dashed"></div>
-                <div className="flex items-start gap-4">
-                  <div className="size-4 rounded-full bg-accent mt-1 relative z-10 border-4 border-white dark:border-slate-900 shadow-sm"></div>
-                  <div className="flex flex-col">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Pickup</span>
-                    <span className="text-sm font-black text-slate-900 dark:text-white">{currentRequest?.pickup.address || 'Andheri West, Mumbai'}</span>
-                  </div>
-                </div>
-                <div className="flex items-start gap-4">
-                  <div className="size-4 rounded-full bg-red-500 mt-1 relative z-10 border-4 border-white dark:border-slate-900 shadow-sm"></div>
-                  <div className="flex flex-col">
-                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Dropoff</span>
-                    <span className="text-sm font-black text-slate-900 dark:text-white">{currentRequest?.dropoff.address || 'Colaba Causeway, Mumbai'}</span>
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex gap-4">
-                <button
-                  onClick={() => {
-                    if (currentRequest?.id) declinedTripsRef.current.add(currentRequest.id);
-                    setShowRequest(false);
-                    setCurrentRequest(null);
-                  }}
-                  className="flex-1 h-16 bg-slate-50 dark:bg-slate-800 text-slate-500 font-black rounded-2xl text-[10px] uppercase tracking-widest active:scale-95 transition-all"
-                >
-                  Decline
-                </button>
-                <button
-                  onClick={handleAcceptRequest}
-                  className="flex-[2] h-16 bg-primary text-white font-black rounded-2xl text-[10px] uppercase tracking-widest shadow-xl shadow-primary/30 active:scale-95 transition-all"
-                >
-                  Accept Request
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      )}
+      {/* Incoming-job popup is rendered by <TripRequestOverlay> at the App level. */}
     </div>
   );
 };

@@ -22,7 +22,7 @@ function vehicleCategoryLabel(category?: string): string {
   return VEHICLE_CATEGORY_LABEL[category] || category;
 }
 
-// Driver is "on the way to drop" once Product A has been picked up.
+// Driver is "on the way to drop" once Product 'A' has been picked up.
 const PRE_PICKUP_STATUSES: BookingStatus[] = [
   BookingStatus.ACCEPTED,
   BookingStatus.ARRIVED_AT_PICKUP,
@@ -153,6 +153,11 @@ const Tracking: React.FC = () => {
   const [showDetails, setShowDetails] = useState(false);
   const [referralCode, setReferralCode] = useState<string>('');
 
+  // Proximity-notification latch — fires the "Your Vehicle is here!" banner
+  // at most once per leg (pickup, drop). Keyed on leg, not status, so the two
+  // flags are independent. Resets on full screen reload — acceptable.
+  const proximityNotifiedRef = useRef<{ pickup: boolean; drop: boolean }>({ pickup: false, drop: false });
+
   // Load (or generate-and-persist) the customer's referral code once we
   // know who the customer is. Used by the Share button's WhatsApp message.
   useEffect(() => {
@@ -162,6 +167,47 @@ const Tracking: React.FC = () => {
       .then(setReferralCode)
       .catch(err => console.error('referralCode load failed:', err));
   }, [trip?.customerId, referralCode]);
+
+  // Fire the "Your Vehicle is here!" banner when the driver gets within ~2 min
+  // of the active leg's destination. ETA estimated as
+  // haversineKm * 1.4 / 25 km/h (city-driving rough). Once-per-leg via ref latch.
+  useEffect(() => {
+    if (!trip || !driverLocation) return;
+    const status = trip.status as BookingStatus;
+
+    const isPrePickup = [
+      BookingStatus.ACCEPTED,
+      BookingStatus.ARRIVED_AT_PICKUP,
+      BookingStatus.PICKING_UP,
+    ].includes(status);
+    const isPostPickupTowardDrop = [
+      BookingStatus.IN_TRANSIT,
+      BookingStatus.ARRIVED_AT_DESTINATION,
+      BookingStatus.DROPPING_OFF,
+      BookingStatus.RETURNING_PRODUCT_B,
+      BookingStatus.RETURNING_PRODUCT_A,
+      BookingStatus.ARRIVED_AT_ORIGIN_RETURN,
+    ].includes(status);
+    if (!isPrePickup && !isPostPickupTowardDrop) return;
+
+    const target = isPrePickup ? trip.pickup : trip.dropoff;
+    if (!target?.lat || !target?.lng) return;
+
+    const km = haversineKm(driverLocation, { lat: target.lat, lng: target.lng });
+    const etaMins = (km * 1.4) / 25 * 60;
+    if (etaMins > 2) return;
+
+    const legKey: 'pickup' | 'drop' = isPrePickup ? 'pickup' : 'drop';
+    if (proximityNotifiedRef.current[legKey]) return;
+    proximityNotifiedRef.current[legKey] = true;
+
+    const driverIdent = driverRcNumber || driverName || 'Your driver-partner';
+    setNotification({
+      title: 'Your Vehicle is here!',
+      message: `Our driver-partner ${driverIdent} is arriving at your ${legKey} location.`,
+    });
+    setTimeout(() => setNotification(null), 6000);
+  }, [driverLocation, trip?.status, trip?.pickup, trip?.dropoff, driverRcNumber, driverName]);
 
   useEffect(() => {
     if (!tripId) return;
@@ -183,13 +229,13 @@ const Tracking: React.FC = () => {
             [BookingStatus.ARRIVED_AT_DESTINATION]: { title: 'At Destination', message: 'Driver has reached the drop-off location.' },
             [BookingStatus.DROPPING_OFF]: { title: 'Delivering', message: 'Driver is delivering your parcel to the receiver.' },
             // Exchange-specific
-            [BookingStatus.ARRIVED_AT_RECEIVER]: { title: 'At Receiver', message: 'Driver has reached the receiver to collect Product B.' },
-            [BookingStatus.PICKING_UP_PRODUCT_B]: { title: 'Collecting Product B', message: 'Driver is collecting Product B from the receiver.' },
+            [BookingStatus.ARRIVED_AT_RECEIVER]: { title: 'At Receiver', message: "Driver has reached the receiver to collect Product 'B'." },
+            [BookingStatus.PICKING_UP_PRODUCT_B]: { title: "Collecting Product 'B'", message: "Driver is collecting Product 'B' from the receiver." },
             [BookingStatus.QC_PENDING]: { title: 'QC Submitted', message: 'Driver submitted quality check. Please review and approve.' },
-            [BookingStatus.QC_APPROVED]: { title: 'QC Approved', message: 'You approved Product B. Driver is returning it to you.' },
-            [BookingStatus.QC_REJECTED]: { title: 'QC Rejected', message: 'You rejected Product B. Driver will return your original item.' },
-            [BookingStatus.RETURNING_PRODUCT_B]: { title: 'Returning Product B', message: 'Driver is on the way back with Product B.' },
-            [BookingStatus.RETURNING_PRODUCT_A]: { title: 'Exchange Failed', message: 'Driver is returning your original item (Product A).' },
+            [BookingStatus.QC_APPROVED]: { title: 'QC Approved', message: "You approved Product 'B'. Driver is returning it to you." },
+            [BookingStatus.QC_REJECTED]: { title: 'QC Rejected', message: "You rejected Product 'B'. Driver will return your original item." },
+            [BookingStatus.RETURNING_PRODUCT_B]: { title: "Returning Product 'B'", message: "Driver is on the way back with Product 'B'." },
+            [BookingStatus.RETURNING_PRODUCT_A]: { title: 'Exchange Failed', message: "Driver is returning your original item (Product 'A')." },
             [BookingStatus.ARRIVED_AT_ORIGIN_RETURN]: { title: 'Driver Arrived', message: 'Driver has arrived to hand over the item.' },
           };
           const n = notifs[data.status];
@@ -254,16 +300,114 @@ const Tracking: React.FC = () => {
     "My plan changed"
   ];
 
-  // Exchange completion screens
+  // Exchange completion — driver rating screen
+  // Modeled on EXTRAS/trip-completed-customer-screen.jpeg.
   if (trip?.status === BookingStatus.EXCHANGE_COMPLETED) {
+    const submitRating = async () => {
+      if (!tripId) { navigate('/home'); return; }
+      setIsSubmittingRating(true);
+      try {
+        await updateDoc(doc(db, 'trips', tripId), {
+          rating: rating || 0,
+          feedback: feedback.trim(),
+          ratedAt: new Date().toISOString(),
+        });
+      } catch (err) {
+        console.error('Rating save error:', err);
+      }
+      setIsSubmittingRating(false);
+      navigate('/home');
+    };
+
     return (
-      <div className="min-h-screen w-full bg-white flex flex-col items-center justify-center p-8 text-center">
-        <div className="size-24 rounded-full bg-green-100 flex items-center justify-center text-green-600 mb-6">
-          <span className="material-symbols-outlined text-5xl filled">swap_horiz</span>
+      <div className="min-h-screen w-full bg-white dark:bg-slate-950 flex flex-col">
+        {/* Skip — top-right */}
+        <div className="px-5 pt-12 flex justify-end">
+          <button
+            onClick={() => navigate('/home')}
+            className="px-5 py-2 bg-white dark:bg-slate-800 text-slate-700 dark:text-slate-200 font-bold text-sm rounded-full shadow-md border border-slate-100 dark:border-slate-700"
+          >
+            Skip
+          </button>
         </div>
-        <h2 className="text-3xl font-black mb-2">Exchange Successful!</h2>
-        <p className="text-slate-500 mb-8">Product B has been delivered to you successfully.</p>
-        <button onClick={() => navigate('/home')} className="w-full h-16 bg-primary text-white font-black rounded-2xl shadow-xl">GO HOME</button>
+
+        <main className="flex-1 px-6 pt-6 flex flex-col items-center text-center">
+          {/* Paid chip */}
+          <div className="self-start flex items-center gap-2 mb-6">
+            <span className="size-7 rounded-full bg-green-500 flex items-center justify-center">
+              <span className="material-symbols-outlined text-white text-base">check</span>
+            </span>
+            <span className="text-lg font-black text-slate-900 dark:text-white">Paid ₹{trip.fare ?? '—'}</span>
+          </div>
+
+          {/* Driver photo */}
+          {driverPhoto ? (
+            <div
+              className="size-20 rounded-full bg-cover bg-center border-2 border-white shadow-md mb-3"
+              style={{ backgroundImage: `url('${driverPhoto}')` }}
+            />
+          ) : (
+            <div className="size-20 rounded-full bg-slate-100 dark:bg-slate-800 flex items-center justify-center mb-3">
+              <span className="material-symbols-outlined text-slate-400 text-3xl">person</span>
+            </div>
+          )}
+
+          {/* Question */}
+          <h2 className="text-xl font-bold mb-6 dark:text-white">
+            How was your ride with {driverName || 'your driver'}?
+          </h2>
+
+          {/* Stars */}
+          <div className="flex justify-center gap-2 mb-6">
+            {[1, 2, 3, 4, 5].map(i => (
+              <button
+                key={i}
+                onClick={() => setRating(i)}
+                aria-label={`Rate ${i} star${i > 1 ? 's' : ''}`}
+                className={`material-symbols-outlined text-5xl transition-all ${
+                  rating >= i ? 'text-amber-400 filled scale-110' : 'text-slate-300 dark:text-slate-600'
+                }`}
+              >
+                star
+              </button>
+            ))}
+          </div>
+
+          {/* Optional feedback */}
+          <textarea
+            placeholder="Any feedback? (optional)"
+            value={feedback}
+            onChange={e => setFeedback(e.target.value)}
+            rows={2}
+            className="w-full bg-slate-50 dark:bg-slate-900 border border-slate-200 dark:border-slate-700 rounded-2xl p-3 text-sm focus:ring-primary focus:border-primary mb-6"
+          />
+
+          {/* Need Help? */}
+          <button
+            onClick={() => navigate('/help')}
+            className="w-full bg-blue-50 dark:bg-primary/10 rounded-2xl p-4 flex items-center gap-3 mb-6"
+          >
+            <span className="size-10 rounded-full bg-primary text-white flex items-center justify-center shrink-0">
+              <span className="material-symbols-outlined">support_agent</span>
+            </span>
+            <div className="flex-1 text-left">
+              <p className="text-sm font-black dark:text-white">Need Help?</p>
+              <p className="text-xs text-slate-500">We are just a tap away</p>
+            </div>
+            <span className="material-symbols-outlined text-slate-400">chevron_right</span>
+          </button>
+        </main>
+
+        {/* Done */}
+        <div className="px-6 pb-8">
+          <button
+            onClick={submitRating}
+            disabled={!rating || isSubmittingRating}
+            className="w-full h-14 bg-slate-100 dark:bg-slate-800 text-slate-500 dark:text-slate-400 font-black rounded-full text-sm uppercase tracking-widest disabled:opacity-50 enabled:bg-primary enabled:text-white enabled:shadow-xl enabled:shadow-primary/30"
+          >
+            {isSubmittingRating ? 'Submitting…' : 'Done'}
+          </button>
+        </div>
       </div>
     );
   }
@@ -275,7 +419,7 @@ const Tracking: React.FC = () => {
           <span className="material-symbols-outlined text-5xl filled">assignment_return</span>
         </div>
         <h2 className="text-3xl font-black mb-2">Exchange Could Not Be Completed</h2>
-        <p className="text-slate-500 mb-2">Your original item (Product A) has been safely returned to you.</p>
+        <p className="text-slate-500 mb-2">Your original item (Product 'A') has been safely returned to you.</p>
         <p className="text-xs text-slate-400 mb-8">Reason: {trip?.exchange?.failureReason?.replace(/_/g, ' ') || 'Unknown'}</p>
         <button onClick={() => navigate('/home')} className="w-full h-16 bg-primary text-white font-black rounded-2xl shadow-xl">GO HOME</button>
       </div>
@@ -295,7 +439,7 @@ const Tracking: React.FC = () => {
           <div className="bg-amber-50 dark:bg-amber-900/20 rounded-2xl p-4 flex items-center gap-3">
             <span className="material-symbols-outlined text-amber-500 text-xl animate-pulse">hourglass_top</span>
             <div>
-              <p className="text-sm font-black text-amber-800">Driver submitted QC for Product B</p>
+              <p className="text-sm font-black text-amber-800">Driver submitted QC for Product 'B'</p>
               <p className="text-xs text-amber-600">Review and approve or reject</p>
             </div>
           </div>
@@ -312,13 +456,13 @@ const Tracking: React.FC = () => {
             </div>
           )}
 
-          {/* Product B Photos */}
+          {/* Product 'B' Photos */}
           {trip.exchange.productB.images?.length > 0 && (
             <div>
-              <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Product B Photos</h4>
+              <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3">Product 'B' Photos</h4>
               <div className="flex gap-3 overflow-x-auto pb-2">
                 {trip.exchange.productB.images.map((url: string, i: number) => (
-                  <img key={i} src={url} alt={`Product B ${i + 1}`} className="w-40 h-40 rounded-2xl object-cover border shrink-0" />
+                  <img key={i} src={url} alt={`Product 'B' ${i + 1}`} className="w-40 h-40 rounded-2xl object-cover border shrink-0" />
                 ))}
               </div>
             </div>
@@ -386,7 +530,7 @@ const Tracking: React.FC = () => {
               disabled={isSubmittingQc}
               className="flex-[2] h-14 bg-green-600 text-white font-black rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50 shadow-lg"
             >
-              <span className="material-symbols-outlined">check</span>Approve Product B
+              <span className="material-symbols-outlined">check</span>Approve Product 'B'
             </button>
           </div>
         </main>
@@ -495,21 +639,56 @@ const Tracking: React.FC = () => {
     // accept renders (this branch returns first).
     const s = trip.status as BookingStatus;
     const has = (xs: BookingStatus[]) => xs.includes(s);
+    // Status sets — each one means "the trip has reached at least this milestone".
+    // Including EXCHANGE_COMPLETED/EXCHANGE_FAILED in every "done" set keeps the
+    // timeline consistent at trip end (no half-grey, half-green state).
+    const POST_PICKUP = [
+      BookingStatus.ARRIVED_AT_PICKUP, BookingStatus.PICKING_UP,
+      BookingStatus.IN_TRANSIT, BookingStatus.ARRIVED_AT_RECEIVER,
+      BookingStatus.PICKING_UP_PRODUCT_B,
+      BookingStatus.QC_PENDING, BookingStatus.QC_APPROVED, BookingStatus.QC_REJECTED,
+      BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A,
+      BookingStatus.ARRIVED_AT_ORIGIN_RETURN,
+      BookingStatus.EXCHANGE_COMPLETED, BookingStatus.EXCHANGE_FAILED,
+    ];
+    const POST_PRODUCT_A = POST_PICKUP.filter(x =>
+      x !== BookingStatus.ARRIVED_AT_PICKUP && x !== BookingStatus.PICKING_UP);
+    const POST_AT_RECEIVER = POST_PRODUCT_A.filter(x => x !== BookingStatus.IN_TRANSIT);
+    const POST_PRODUCT_B = [
+      BookingStatus.QC_PENDING, BookingStatus.QC_APPROVED, BookingStatus.QC_REJECTED,
+      BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A,
+      BookingStatus.ARRIVED_AT_ORIGIN_RETURN,
+      BookingStatus.EXCHANGE_COMPLETED, BookingStatus.EXCHANGE_FAILED,
+    ];
+    const POST_RETURNING = [
+      BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A,
+      BookingStatus.ARRIVED_AT_ORIGIN_RETURN,
+      BookingStatus.EXCHANGE_COMPLETED, BookingStatus.EXCHANGE_FAILED,
+    ];
+    const failureReason = trip.exchange?.failureReason;
     const exchangeSteps: Array<{ key: string; label: string; sub: string; icon: string; done: boolean }> = [
       { key: 'placed', label: 'Order Placed', sub: 'Exchange booking confirmed', icon: 'check_circle', done: true },
       { key: 'assigned', label: 'Driver Assigned', sub: driverName ? `${driverName} assigned` : 'Driver on the way', icon: 'person_pin', done: true },
-      { key: 'product_a', label: 'Product A Picked Up', sub: 'Driver collected your item', icon: 'inventory_2',
-        done: has([BookingStatus.IN_TRANSIT, BookingStatus.ARRIVED_AT_RECEIVER, BookingStatus.PICKING_UP_PRODUCT_B, BookingStatus.QC_APPROVED, BookingStatus.QC_REJECTED, BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A, BookingStatus.ARRIVED_AT_ORIGIN_RETURN]) },
+      { key: 'at_pickup', label: 'Driver at Pickup', sub: 'Driver reached pickup point', icon: 'location_on',
+        done: has(POST_PICKUP) },
+      { key: 'product_a', label: "Product 'A' Picked Up", sub: 'Driver collected your item', icon: 'inventory_2',
+        done: has(POST_PRODUCT_A) },
       { key: 'at_receiver', label: 'At Receiver Location', sub: 'Driver at receiver for exchange', icon: 'location_on',
-        done: has([BookingStatus.ARRIVED_AT_RECEIVER, BookingStatus.PICKING_UP_PRODUCT_B, BookingStatus.QC_APPROVED, BookingStatus.QC_REJECTED, BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A, BookingStatus.ARRIVED_AT_ORIGIN_RETURN]) },
-      { key: 'product_b', label: 'Product B Collected', sub: 'Return item collected', icon: 'package_2',
-        done: has([BookingStatus.QC_APPROVED, BookingStatus.RETURNING_PRODUCT_B, BookingStatus.ARRIVED_AT_ORIGIN_RETURN]) },
+        done: has(POST_AT_RECEIVER) },
+      { key: 'product_b',
+        label: failureReason ? "Product 'B' Skipped" : "Product 'B' Collected",
+        sub: failureReason === 'product_b_unavailable' ? 'Receiver did not have it'
+          : failureReason ? 'Not collected' : 'Return item collected',
+        icon: 'package_2',
+        done: has(POST_PRODUCT_B) },
       ...(trip.exchange?.qcRequired ? [{ key: 'qc', label: 'Quality Check',
-        sub: trip.exchange?.qcDecision === 'approved' ? 'Approved' : trip.exchange?.qcDecision === 'rejected' ? 'Rejected' : 'Awaiting your review',
+        sub: trip.exchange?.qcDecision === 'approved' ? 'Approved'
+          : trip.exchange?.qcDecision === 'rejected' ? 'Rejected'
+          : failureReason ? 'Skipped' : 'Awaiting your review',
         icon: 'verified',
-        done: has([BookingStatus.QC_APPROVED, BookingStatus.QC_REJECTED, BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A, BookingStatus.ARRIVED_AT_ORIGIN_RETURN]) }] : []),
-      { key: 'returning', label: 'Returning to You', sub: trip.exchange?.failureReason ? 'Returning Product A' : 'Returning Product B', icon: 'undo',
-        done: has([BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A, BookingStatus.ARRIVED_AT_ORIGIN_RETURN]) },
+        done: has([BookingStatus.QC_APPROVED, BookingStatus.QC_REJECTED, ...POST_RETURNING]) }] : []),
+      { key: 'returning', label: 'Returning to You', sub: failureReason ? "Returning Product 'A'" : "Returning Product 'B'", icon: 'undo',
+        done: has(POST_RETURNING) },
     ];
     const activeStepIdx = exchangeSteps.findIndex(st => !st.done);
 
@@ -852,12 +1031,12 @@ const Tracking: React.FC = () => {
             {trip?.status === BookingStatus.ARRIVED_AT_DESTINATION && 'Driver arrived at destination'}
             {trip?.status === BookingStatus.DROPPING_OFF && 'Delivering your parcel'}
             {trip?.status === BookingStatus.ARRIVED_AT_RECEIVER && 'Driver at receiver location'}
-            {trip?.status === BookingStatus.PICKING_UP_PRODUCT_B && 'Collecting Product B'}
+            {trip?.status === BookingStatus.PICKING_UP_PRODUCT_B && "Collecting Product 'B'"}
             {trip?.status === BookingStatus.QC_PENDING && 'Review Quality Check'}
             {trip?.status === BookingStatus.QC_APPROVED && 'QC Approved — returning'}
             {trip?.status === BookingStatus.QC_REJECTED && 'QC Rejected — returning original'}
-            {trip?.status === BookingStatus.RETURNING_PRODUCT_B && 'Returning Product B to you'}
-            {trip?.status === BookingStatus.RETURNING_PRODUCT_A && 'Returning Product A to you'}
+            {trip?.status === BookingStatus.RETURNING_PRODUCT_B && "Returning Product 'B' to you"}
+            {trip?.status === BookingStatus.RETURNING_PRODUCT_A && "Returning Product 'A' to you"}
             {trip?.status === BookingStatus.ARRIVED_AT_ORIGIN_RETURN && 'Driver arrived for handover'}
           </div>
           <div className="w-10"></div>
@@ -952,31 +1131,56 @@ const Tracking: React.FC = () => {
 
           const exchangeDoneStatuses = (targets: BookingStatus[]) => targets.includes(s);
 
+          // Same shape as the Exchange post-accept bottom-sheet timeline above —
+          // this inline copy only renders during SEARCHING (the new layout takes
+          // over from ACCEPTED onward), but kept consistent so back-navigation
+          // edge cases don't show a different ladder.
+          const failureReasonInline = trip?.exchange?.failureReason;
+          const POST_PICKUP_X = [BookingStatus.ARRIVED_AT_PICKUP, BookingStatus.PICKING_UP, BookingStatus.IN_TRANSIT, BookingStatus.ARRIVED_AT_RECEIVER, BookingStatus.PICKING_UP_PRODUCT_B, BookingStatus.QC_PENDING, BookingStatus.QC_APPROVED, BookingStatus.QC_REJECTED, BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A, BookingStatus.ARRIVED_AT_ORIGIN_RETURN, BookingStatus.EXCHANGE_COMPLETED, BookingStatus.EXCHANGE_FAILED];
+          const POST_PRODUCT_A_X = POST_PICKUP_X.filter(x => x !== BookingStatus.ARRIVED_AT_PICKUP && x !== BookingStatus.PICKING_UP);
+          const POST_AT_RECEIVER_X = POST_PRODUCT_A_X.filter(x => x !== BookingStatus.IN_TRANSIT);
+          const POST_PRODUCT_B_X = [BookingStatus.QC_PENDING, BookingStatus.QC_APPROVED, BookingStatus.QC_REJECTED, BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A, BookingStatus.ARRIVED_AT_ORIGIN_RETURN, BookingStatus.EXCHANGE_COMPLETED, BookingStatus.EXCHANGE_FAILED];
+          const POST_RETURNING_X = [BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A, BookingStatus.ARRIVED_AT_ORIGIN_RETURN, BookingStatus.EXCHANGE_COMPLETED, BookingStatus.EXCHANGE_FAILED];
           const exchangeSteps = [
             { key: 'placed', label: 'Order Placed', sub: 'Exchange booking confirmed', icon: 'check_circle', done: true },
             { key: 'assigned', label: 'Driver Assigned', sub: driverName ? `${driverName} assigned` : 'Finding a driver', icon: 'person_pin', done: s !== BookingStatus.SEARCHING },
-            { key: 'product_a', label: 'Product A Picked Up', sub: 'Driver collected your item', icon: 'inventory_2',
-              done: exchangeDoneStatuses([BookingStatus.IN_TRANSIT, BookingStatus.ARRIVED_AT_RECEIVER, BookingStatus.PICKING_UP_PRODUCT_B, BookingStatus.QC_PENDING, BookingStatus.QC_APPROVED, BookingStatus.QC_REJECTED, BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A, BookingStatus.ARRIVED_AT_ORIGIN_RETURN, BookingStatus.EXCHANGE_COMPLETED, BookingStatus.EXCHANGE_FAILED]) },
+            { key: 'at_pickup', label: 'Driver at Pickup', sub: 'Driver reached pickup point', icon: 'location_on',
+              done: exchangeDoneStatuses(POST_PICKUP_X) },
+            { key: 'product_a', label: "Product 'A' Picked Up", sub: 'Driver collected your item', icon: 'inventory_2',
+              done: exchangeDoneStatuses(POST_PRODUCT_A_X) },
             { key: 'at_receiver', label: 'At Receiver Location', sub: 'Driver at receiver for exchange', icon: 'location_on',
-              done: exchangeDoneStatuses([BookingStatus.ARRIVED_AT_RECEIVER, BookingStatus.PICKING_UP_PRODUCT_B, BookingStatus.QC_PENDING, BookingStatus.QC_APPROVED, BookingStatus.QC_REJECTED, BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A, BookingStatus.ARRIVED_AT_ORIGIN_RETURN, BookingStatus.EXCHANGE_COMPLETED, BookingStatus.EXCHANGE_FAILED]) },
-            { key: 'product_b', label: 'Product B Collected', sub: 'Return item collected', icon: 'package_2',
-              done: exchangeDoneStatuses([BookingStatus.QC_PENDING, BookingStatus.QC_APPROVED, BookingStatus.RETURNING_PRODUCT_B, BookingStatus.ARRIVED_AT_ORIGIN_RETURN, BookingStatus.EXCHANGE_COMPLETED]) },
+              done: exchangeDoneStatuses(POST_AT_RECEIVER_X) },
+            { key: 'product_b',
+              label: failureReasonInline ? "Product 'B' Skipped" : "Product 'B' Collected",
+              sub: failureReasonInline === 'product_b_unavailable' ? 'Receiver did not have it'
+                : failureReasonInline ? 'Not collected' : 'Return item collected',
+              icon: 'package_2',
+              done: exchangeDoneStatuses(POST_PRODUCT_B_X) },
             ...(trip?.exchange?.qcRequired ? [{ key: 'qc', label: 'Quality Check',
-              sub: trip?.exchange?.qcDecision === 'approved' ? 'Approved' : trip?.exchange?.qcDecision === 'rejected' ? 'Rejected' : 'Awaiting your review',
+              sub: trip?.exchange?.qcDecision === 'approved' ? 'Approved'
+                : trip?.exchange?.qcDecision === 'rejected' ? 'Rejected'
+                : failureReasonInline ? 'Skipped' : 'Awaiting your review',
               icon: 'verified',
-              done: exchangeDoneStatuses([BookingStatus.QC_APPROVED, BookingStatus.QC_REJECTED, BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A, BookingStatus.ARRIVED_AT_ORIGIN_RETURN, BookingStatus.EXCHANGE_COMPLETED, BookingStatus.EXCHANGE_FAILED]) }] : []),
-            { key: 'returning', label: 'Returning to You', sub: trip?.exchange?.failureReason ? 'Returning Product A' : 'Returning Product B', icon: 'undo',
-              done: exchangeDoneStatuses([BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A, BookingStatus.ARRIVED_AT_ORIGIN_RETURN, BookingStatus.EXCHANGE_COMPLETED, BookingStatus.EXCHANGE_FAILED]) },
+              done: exchangeDoneStatuses([BookingStatus.QC_APPROVED, BookingStatus.QC_REJECTED, ...POST_RETURNING_X]) }] : []),
+            { key: 'returning', label: 'Returning to You', sub: failureReasonInline ? "Returning Product 'A'" : "Returning Product 'B'", icon: 'undo',
+              done: exchangeDoneStatuses(POST_RETURNING_X) },
             { key: 'done', label: 'Completed', sub: 'Exchange finished', icon: 'task_alt',
               done: exchangeDoneStatuses([BookingStatus.EXCHANGE_COMPLETED, BookingStatus.EXCHANGE_FAILED]) },
           ];
 
+          // Each "done" set is "status has reached at least this milestone".
+          // Including COMPLETED in every set keeps the timeline consistent at
+          // trip end (no half-grey, half-green state if the rating screen
+          // doesn't take over for a moment).
           const parcelSteps = [
             { key: 'placed', label: 'Order Placed', sub: 'Booking confirmed', icon: 'check_circle', done: true },
             { key: 'assigned', label: 'Driver Assigned', sub: driverName ? `${driverName} is assigned` : 'Finding a driver', icon: 'person_pin', done: s !== BookingStatus.SEARCHING },
-            { key: 'at_pickup', label: 'Arrived at Pickup', sub: 'Driver reached pickup point', icon: 'location_on', done: [BookingStatus.ARRIVED_AT_PICKUP, BookingStatus.PICKING_UP, BookingStatus.IN_TRANSIT, BookingStatus.ARRIVED_AT_DESTINATION, BookingStatus.DROPPING_OFF].includes(s) },
-            { key: 'picked_up', label: 'Parcel Picked Up', sub: 'On the way to destination', icon: 'inventory_2', done: [BookingStatus.IN_TRANSIT, BookingStatus.ARRIVED_AT_DESTINATION, BookingStatus.DROPPING_OFF].includes(s) },
-            { key: 'at_dest', label: 'At Destination', sub: 'Driver reached drop location', icon: 'flag', done: [BookingStatus.ARRIVED_AT_DESTINATION, BookingStatus.DROPPING_OFF].includes(s) },
+            { key: 'at_pickup', label: 'Driver at Pickup', sub: 'Driver reached pickup point', icon: 'location_on',
+              done: [BookingStatus.ARRIVED_AT_PICKUP, BookingStatus.PICKING_UP, BookingStatus.IN_TRANSIT, BookingStatus.ARRIVED_AT_DESTINATION, BookingStatus.DROPPING_OFF, BookingStatus.COMPLETED].includes(s) },
+            { key: 'picked_up', label: 'Parcel Picked Up', sub: 'On the way to destination', icon: 'inventory_2',
+              done: [BookingStatus.IN_TRANSIT, BookingStatus.ARRIVED_AT_DESTINATION, BookingStatus.DROPPING_OFF, BookingStatus.COMPLETED].includes(s) },
+            { key: 'at_dest', label: 'At Destination', sub: 'Driver reached drop location', icon: 'flag',
+              done: [BookingStatus.ARRIVED_AT_DESTINATION, BookingStatus.DROPPING_OFF, BookingStatus.COMPLETED].includes(s) },
             { key: 'delivered', label: 'Delivered', sub: 'Parcel handed over', icon: 'verified', done: s === BookingStatus.COMPLETED },
           ];
 

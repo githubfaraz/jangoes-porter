@@ -105,6 +105,10 @@ export interface Trip {
   paymentMethod?: 'cash' | 'online';
   paymentConfirmed?: boolean;
   serverValidatedFare?: number;
+  // Coupon redemption — set on trip creation when the customer applies a code
+  // in OrderSummary. couponDiscount is the amount deducted from `fare`.
+  couponCode?: string;
+  couponDiscount?: number;
   // Service type discriminator
   serviceType?: 'parcel' | 'reverse-parcel' | 'exchange';
   // Exchange-specific fields

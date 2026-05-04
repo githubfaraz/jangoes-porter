@@ -12,6 +12,14 @@ const OrderSummary: React.FC = () => {
   const [walletBalance, setWalletBalance] = useState(0);
   const [paymentMethod, setPaymentMethod] = useState<'wallet' | 'cash' | 'upi'>('cash');
 
+  // Coupon redemption state. `applied` carries the validated code + discount
+  // until trip creation, where it's persisted on the trip doc and the coupon's
+  // usedCount is incremented via /api/redeem-coupon.
+  const [couponInput, setCouponInput] = useState('');
+  const [applyingCoupon, setApplyingCoupon] = useState(false);
+  const [couponError, setCouponError] = useState('');
+  const [appliedCoupon, setAppliedCoupon] = useState<{ code: string; discount: number } | null>(null);
+
   // All data passed through the booking flow
   const { pickup, drop, parcel, dimensions, vehicle, fare: routeFare, fareBreakdown, distanceKm, serviceType, exchange: exchangeData } = location.state || {};
   const isExchange = serviceType === 'exchange';
@@ -25,6 +33,9 @@ const OrderSummary: React.FC = () => {
   const productAHandoverOtpRef = useRef(Math.floor(1000 + Math.random() * 9000).toString());
 
   const fare: number = routeFare ?? dimensions?.estimatedCost ?? 0;
+  // Final fare after coupon discount — what the customer actually pays.
+  const couponDiscount = appliedCoupon?.discount ?? 0;
+  const finalFare: number = Math.max(0, +(fare - couponDiscount).toFixed(2));
 
   // Load wallet balance
   useEffect(() => {
@@ -35,14 +46,44 @@ const OrderSummary: React.FC = () => {
     });
   }, []);
 
-  // Auto-select: wallet if sufficient, otherwise cash
+  // Auto-select: wallet if sufficient (after coupon), otherwise cash
   useEffect(() => {
-    if (walletBalance >= fare && fare > 0) {
+    if (walletBalance >= finalFare && finalFare > 0) {
       setPaymentMethod('wallet');
     } else if (paymentMethod === 'wallet') {
       setPaymentMethod('cash');
     }
-  }, [walletBalance, fare]);
+  }, [walletBalance, finalFare]);
+
+  const handleApplyCoupon = async () => {
+    const code = couponInput.trim().toUpperCase();
+    if (!code) return;
+    setApplyingCoupon(true);
+    setCouponError('');
+    try {
+      const res = await fetch('/api/validate-coupon', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ code, orderAmount: fare }),
+      });
+      const data = await res.json();
+      if (!data.valid) {
+        setCouponError(data.reason || 'Invalid coupon');
+        return;
+      }
+      setAppliedCoupon({ code: data.code, discount: data.discount });
+    } catch (err: any) {
+      setCouponError('Could not validate. Try again.');
+    } finally {
+      setApplyingCoupon(false);
+    }
+  };
+
+  const handleRemoveCoupon = () => {
+    setAppliedCoupon(null);
+    setCouponInput('');
+    setCouponError('');
+  };
 
   // Use real breakdown from fareService if available, else split proportionally
   const baseFare       = fareBreakdown?.baseFare        ?? Math.round(fare * 0.64);
@@ -77,8 +118,12 @@ const OrderSummary: React.FC = () => {
         },
         vehicleType:   vehicle?.name  || 'Standard Vehicle',
         vehicleId:     vehicle?.id    || '',
-        fare,
+        // Save the discounted total as the trip's fare; preserve the
+        // pre-discount estimate + coupon details separately so the breakdown
+        // in TripDetails / invoice shows the discount line.
+        fare:          finalFare,
         fareVersion:   2,
+        ...(appliedCoupon ? { couponCode: appliedCoupon.code, couponDiscount: appliedCoupon.discount } : {}),
         estimatedTripFare: fareBreakdown?.tripFare ?? fare,
         estimatedTotal: fareBreakdown?.estimatedTotal ?? fare,
         durationMins: fareBreakdown?.durationMins ?? 0,
@@ -142,6 +187,16 @@ const OrderSummary: React.FC = () => {
       }
 
       const docRef = await addDoc(collection(db, 'trips'), tripData);
+      // Best-effort: increment coupon usage. Failure here doesn't break the
+      // booking — the coupon stays slightly under-counted, which is the
+      // friendlier failure mode.
+      if (appliedCoupon) {
+        fetch('/api/redeem-coupon', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code: appliedCoupon.code }),
+        }).catch(() => {});
+      }
       navigate('/tracking', { state: { tripId: docRef.id } });
     } catch (err: any) {
       console.error('Booking Error:', err);
@@ -235,13 +290,13 @@ const OrderSummary: React.FC = () => {
             </div>
             <div className="flex flex-col gap-3">
               <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3">
-                <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-1">Sending (Product A)</p>
+                <p className="text-[10px] font-black text-blue-600 uppercase tracking-widest mb-1">Sending (Product 'A')</p>
                 <p className="text-sm font-medium text-slate-900 dark:text-white">{exchangeData.productA?.description}</p>
                 {exchangeData.productA?.category && <p className="text-xs text-slate-400 mt-0.5">{exchangeData.productA.category}</p>}
               </div>
               <div className="flex items-center justify-center"><span className="material-symbols-outlined text-slate-300">swap_vert</span></div>
               <div className="bg-green-50 dark:bg-green-900/20 rounded-xl p-3">
-                <p className="text-[10px] font-black text-green-600 uppercase tracking-widest mb-1">Receiving (Product B)</p>
+                <p className="text-[10px] font-black text-green-600 uppercase tracking-widest mb-1">Receiving (Product 'B')</p>
                 <p className="text-sm font-medium text-slate-900 dark:text-white">{exchangeData.productB?.description}</p>
                 {exchangeData.productB?.category && <p className="text-xs text-slate-400 mt-0.5">{exchangeData.productB.category}</p>}
               </div>
@@ -282,6 +337,46 @@ const OrderSummary: React.FC = () => {
           </div>
         )}
 
+        {/* Coupon */}
+        <div className="bg-white dark:bg-surface-dark rounded-xl p-5 shadow-sm">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="material-symbols-outlined text-primary">local_offer</span>
+            <h3 className="text-base font-bold">Have a coupon code?</h3>
+          </div>
+          {appliedCoupon ? (
+            <div className="flex items-center justify-between bg-green-50 dark:bg-green-900/10 rounded-xl px-4 py-3">
+              <div className="flex items-center gap-2 min-w-0">
+                <span className="material-symbols-outlined text-green-600 text-xl">check_circle</span>
+                <div className="flex flex-col min-w-0">
+                  <span className="text-sm font-bold text-green-700 dark:text-green-400 truncate">{appliedCoupon.code} applied</span>
+                  <span className="text-xs text-green-600">You saved ₹{appliedCoupon.discount.toFixed(2)}</span>
+                </div>
+              </div>
+              <button onClick={handleRemoveCoupon} className="text-xs font-bold text-red-500 px-2">Remove</button>
+            </div>
+          ) : (
+            <>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={couponInput}
+                  onChange={e => { setCouponInput(e.target.value.toUpperCase()); if (couponError) setCouponError(''); }}
+                  placeholder="ENTER CODE"
+                  className="flex-1 h-11 px-3 rounded-xl border border-slate-200 dark:border-slate-700 bg-slate-50 dark:bg-slate-800 text-sm font-bold tracking-widest uppercase focus:border-primary focus:outline-none"
+                />
+                <button
+                  onClick={handleApplyCoupon}
+                  disabled={applyingCoupon || !couponInput.trim()}
+                  className="h-11 px-5 bg-primary text-white text-sm font-bold rounded-xl disabled:opacity-50 active:scale-[0.98] transition-transform"
+                >
+                  {applyingCoupon ? '…' : 'Apply'}
+                </button>
+              </div>
+              {couponError && <p className="text-xs text-red-500 font-medium mt-2">{couponError}</p>}
+            </>
+          )}
+        </div>
+
         {/* Fare Breakdown */}
         <div className="bg-white dark:bg-surface-dark rounded-xl p-5 shadow-sm">
           <div className="flex items-center justify-between mb-4">
@@ -311,10 +406,16 @@ const OrderSummary: React.FC = () => {
                 <span className="font-medium">₹{gst}</span>
               </div>
             )}
+            {appliedCoupon && (
+              <div className="flex justify-between text-sm text-green-600">
+                <span>Coupon discount ({appliedCoupon.code})</span>
+                <span className="font-medium">−₹{appliedCoupon.discount.toFixed(2)}</span>
+              </div>
+            )}
             <div className="my-1 border-t border-dashed border-slate-200"></div>
             <div className="flex justify-between items-center">
               <span className="font-bold">Estimated Total</span>
-              <span className="font-bold text-lg text-primary">₹{fare}</span>
+              <span className="font-bold text-lg text-primary">₹{finalFare}</span>
             </div>
           </div>
         </div>
@@ -325,7 +426,7 @@ const OrderSummary: React.FC = () => {
       <div className="bg-white dark:bg-surface-dark rounded-xl p-5 shadow-sm mx-4 mb-4">
         <h3 className="text-base font-bold mb-3">Payment Method</h3>
         <div className="flex flex-col gap-2">
-          {walletBalance >= fare && fare > 0 ? (
+          {walletBalance >= finalFare && finalFare > 0 ? (
             /* Wallet has sufficient balance — show only wallet */
             <div className="flex items-center gap-3 p-3 rounded-xl border-2 border-primary bg-primary/5">
               <div className="size-10 rounded-xl flex items-center justify-center bg-primary text-white">
@@ -381,7 +482,7 @@ const OrderSummary: React.FC = () => {
             <span className="material-symbols-outlined animate-spin">sync</span>
           ) : (
             <>
-              <span>Confirm Booking • ₹{fare}</span>
+              <span>Confirm Booking • ₹{finalFare}</span>
               <span className="material-symbols-outlined">arrow_forward</span>
             </>
           )}

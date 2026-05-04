@@ -34,6 +34,33 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
   const status = trip.status;
   const exchange = trip.exchange;
 
+  // Customer-uploaded reference photos for Product 'B' — shown to the driver
+  // while they're with the receiver so they can verify the item before pickup.
+  // Tap any thumbnail to open the existing fullscreen image viewer.
+  const productBReferencePhotos: string[] = exchange?.productB?.referencePhotos || [];
+  const renderProductBReferenceStrip = () => {
+    if (productBReferencePhotos.length === 0) return null;
+    return (
+      <div className="bg-emerald-50 dark:bg-emerald-900/10 rounded-xl p-3 border border-emerald-200/60 dark:border-emerald-900/30">
+        <p className="text-[10px] font-black text-emerald-700 dark:text-emerald-400 uppercase tracking-widest mb-1">Customer's Product 'B' reference photos</p>
+        <p className="text-[10px] text-slate-500 mb-2">Tap any photo to enlarge. Verify before pickup.</p>
+        <div className="flex gap-2 overflow-x-auto">
+          {productBReferencePhotos.map((url, i) => (
+            <button
+              key={i}
+              type="button"
+              onClick={() => setFullScreenImage(url)}
+              aria-label={`Open Product 'B' reference photo ${i + 1}`}
+              className="size-20 rounded-lg overflow-hidden border shrink-0 active:scale-95 transition-transform"
+            >
+              <img src={url} className="w-full h-full object-cover" alt="" />
+            </button>
+          ))}
+        </div>
+      </div>
+    );
+  };
+
   const update = async (s: BookingStatus, extra: any = {}) => {
     setLoading(true);
     try {
@@ -119,7 +146,7 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
           <span className="material-symbols-outlined text-5xl filled">assignment_return</span>
         </div>
         <h2 className="text-3xl font-black mb-2">Exchange Failed</h2>
-        <p className="text-slate-500 mb-2">Product A has been safely returned to the requestor.</p>
+        <p className="text-slate-500 mb-2">Product 'A' has been safely returned to the requestor.</p>
         <p className="text-xs text-slate-400 mb-8">Reason: {exchange?.failureReason?.replace(/_/g, ' ') || 'Unknown'}</p>
         <div className="w-full bg-slate-50 rounded-3xl p-6 mb-8">
           <div className="flex justify-between"><span className="text-slate-400 font-bold text-xs uppercase">Earnings</span><span className="font-black text-xl">₹{trip.fare?.toFixed(2)}</span></div>
@@ -130,7 +157,7 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
   }
 
   const renderStep = () => {
-    // ── LEG 1: Pick up Product A from Location Y ──
+    // ── LEG 1: Pick up Product 'A' from Location Y ──
     if (status === BookingStatus.ACCEPTED) {
       return (
         <div className="flex flex-col gap-4">
@@ -146,7 +173,7 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
             </div>
           </div>
           <div className="bg-blue-50 dark:bg-blue-900/20 rounded-xl p-3">
-            <p className="text-[10px] font-black text-blue-600 uppercase mb-1">Product A to collect</p>
+            <p className="text-[10px] font-black text-blue-600 uppercase mb-1">Product 'A' to collect</p>
             <p className="text-sm font-medium">{exchange?.productA?.description || 'Item'}</p>
             {exchange?.productA?.referencePhotos?.length > 0 && (
               <div className="flex gap-2 mt-2 overflow-x-auto">
@@ -168,7 +195,7 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
       return (
         <div className="flex flex-col gap-4">
           <div className="p-3 bg-green-50 rounded-2xl text-center">
-            <p className="text-xs font-bold text-green-600 uppercase tracking-widest">Arrived at Pickup — Collect Product A</p>
+            <p className="text-xs font-bold text-green-600 uppercase tracking-widest">Arrived at Pickup — Collect Product 'A'</p>
           </div>
           <div className="flex flex-col gap-2">
             <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Enter Pickup PIN</label>
@@ -176,12 +203,12 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
               className="w-full h-14 bg-white border-2 border-slate-100 rounded-2xl px-5 text-center text-2xl font-black tracking-[0.5em] focus:border-primary" placeholder="----" />
           </div>
           <div className="flex flex-col gap-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Photo of Product A (mandatory)</label>
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Photo of Product 'A' (mandatory)</label>
             <input ref={imageInputRef} type="file" accept="image/*" capture="environment" className="hidden"
               onChange={e => handleImageUpload(e, setProductAImage, 'product-a', setUploadingProductA)} />
             {productAImage ? (
               <div className="relative rounded-2xl overflow-hidden border-2 border-slate-100 h-40">
-                <img src={productAImage} className="w-full h-full object-cover" alt="Product A" />
+                <img src={productAImage} className="w-full h-full object-cover" alt="Product 'A'" />
               </div>
             ) : uploadingProductA ? (
               <div className="w-full h-32 rounded-2xl border-2 border-dashed border-primary/30 bg-primary/5 flex flex-col items-center justify-center gap-2 text-primary">
@@ -192,14 +219,23 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
               <button onClick={() => imageInputRef.current?.click()} disabled={loading}
                 className="w-full h-32 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 text-slate-400">
                 <span className="material-symbols-outlined text-3xl">add_a_photo</span>
-                <span className="text-xs font-bold">Take photo of Product A</span>
+                <span className="text-xs font-bold">Take photo of Product 'A'</span>
               </button>
             )}
           </div>
           <button onClick={() => {
             if (pickupPinInput !== trip.pickupPin) { alert('Invalid PIN'); return; }
-            if (!productAImage) { alert('Please capture Product A photo'); return; }
+            if (!productAImage) { alert('Please capture Product \'A\' photo'); return; }
             update(BookingStatus.IN_TRANSIT, { 'exchange.productA.images': [productAImage] });
+            // Mirror Parcel flow (ActiveTrip.tsx): notify receiver they're the
+            // recipient + share the OTP they'll need to give the rider on arrival.
+            if (trip?.receiverPhone && trip?.dropoffOtp) {
+              fetch('/api/send-delivery-otp', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ receiverPhone: trip.receiverPhone, otp: trip.dropoffOtp, senderName: trip.senderName }),
+              }).catch(() => {});
+            }
           }} disabled={loading}
             className="w-full h-16 bg-primary text-white font-black rounded-2xl shadow-xl flex items-center justify-center gap-2 disabled:opacity-50">
             <span className="material-symbols-outlined">play_arrow</span>PROCEED TO RECEIVER
@@ -224,12 +260,20 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
             </div>
           </div>
           <div className="bg-green-50 rounded-xl p-3">
-            <p className="text-[10px] font-black text-green-600 uppercase mb-1">Product B to collect</p>
+            <p className="text-[10px] font-black text-green-600 uppercase mb-1">Product 'B' to collect</p>
             <p className="text-sm font-medium">{exchange?.productB?.description || 'Item'}</p>
             {exchange?.productB?.referencePhotos?.length > 0 && (
               <div className="flex gap-2 mt-2 overflow-x-auto">
                 {exchange.productB.referencePhotos.map((url: string, i: number) => (
-                  <img key={i} src={url} className="size-16 rounded-lg object-cover border shrink-0" alt="" />
+                  <button
+                    key={i}
+                    type="button"
+                    onClick={() => setFullScreenImage(url)}
+                    aria-label={`Open Product 'B' reference photo ${i + 1}`}
+                    className="size-16 rounded-lg overflow-hidden border shrink-0 active:scale-95 transition-transform"
+                  >
+                    <img src={url} className="w-full h-full object-cover" alt="" />
+                  </button>
                 ))}
               </div>
             )}
@@ -248,7 +292,8 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
           <div className="p-3 bg-green-50 rounded-2xl text-center">
             <p className="text-xs font-bold text-green-600 uppercase tracking-widest">At Receiver Location</p>
           </div>
-          <p className="text-sm text-slate-600 font-medium text-center">Is Product B available for collection?</p>
+          {renderProductBReferenceStrip()}
+          <p className="text-sm text-slate-600 font-medium text-center">Is Product 'B' available for collection?</p>
           <div className="flex gap-3">
             <button onClick={() => update(BookingStatus.PICKING_UP_PRODUCT_B)} disabled={loading}
               className="flex-1 h-14 bg-green-600 text-white font-black rounded-2xl flex items-center justify-center gap-2 disabled:opacity-50">
@@ -267,15 +312,16 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
       return (
         <div className="flex flex-col gap-4">
           <div className="p-3 bg-green-50 rounded-2xl text-center">
-            <p className="text-xs font-bold text-green-600 uppercase tracking-widest">Collecting Product B</p>
+            <p className="text-xs font-bold text-green-600 uppercase tracking-widest">Collecting Product 'B'</p>
           </div>
+          {renderProductBReferenceStrip()}
           <div className="flex flex-col gap-2">
-            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Photo of Product B</label>
+            <label className="text-[10px] font-black text-slate-400 uppercase tracking-widest ml-1">Photo of Product 'B'</label>
             <input ref={imageInputRef} type="file" accept="image/*" capture="environment" className="hidden"
               onChange={e => handleImageUpload(e, setProductBImage, 'product-b', setUploadingProductB)} />
             {productBImage ? (
               <div className="relative rounded-2xl overflow-hidden border-2 border-slate-100 h-40">
-                <img src={productBImage} className="w-full h-full object-cover" alt="Product B" />
+                <img src={productBImage} className="w-full h-full object-cover" alt="Product 'B'" />
               </div>
             ) : uploadingProductB ? (
               <div className="w-full h-32 rounded-2xl border-2 border-dashed border-emerald-500/30 bg-emerald-500/5 flex flex-col items-center justify-center gap-2 text-emerald-500">
@@ -286,7 +332,7 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
               <button onClick={() => imageInputRef.current?.click()} disabled={loading}
                 className="w-full h-32 border-2 border-dashed border-slate-200 rounded-2xl flex flex-col items-center justify-center gap-2 text-slate-400">
                 <span className="material-symbols-outlined text-3xl">add_a_photo</span>
-                <span className="text-xs font-bold">Take photo of Product B</span>
+                <span className="text-xs font-bold">Take photo of Product 'B'</span>
               </button>
             )}
           </div>
@@ -357,7 +403,7 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
                 </div>
               </div>
               <button onClick={() => {
-                if (!productBImage) { alert('Please capture Product B photo'); return; }
+                if (!productBImage) { alert("Please capture Product 'B' photo"); return; }
                 // Verify all QC checklist items are checked
                 const qcItemsList = (exchange as any).qcItems || [];
                 const allChecked = qcItemsList.length === 0 || qcItemsList.every((_: string, i: number) => qcChecked[i]);
@@ -374,7 +420,7 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
             </>
           ) : (
             <button onClick={() => {
-              if (!productBImage) { alert('Please capture Product B photo'); return; }
+              if (!productBImage) { alert("Please capture Product 'B' photo"); return; }
               update(BookingStatus.RETURNING_PRODUCT_B, { 'exchange.productB.images': [productBImage] });
             }} disabled={loading}
               className="w-full h-14 bg-primary text-white font-black rounded-2xl shadow-lg flex items-center justify-center gap-2 disabled:opacity-50">
@@ -410,14 +456,14 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
             <p className="text-sm font-black text-green-600 mt-2">QC of product is approved. Now handover the new product</p>
           </div>
 
-          {/* Product A handover preview */}
+          {/* Product 'A' handover preview */}
           <div className="bg-blue-50 rounded-xl p-3">
-            <p className="text-[10px] font-black text-blue-600 uppercase mb-2">Hand Over Product A to Receiver</p>
+            <p className="text-[10px] font-black text-blue-600 uppercase mb-2">Hand Over Product 'A' to Receiver</p>
             <p className="text-sm font-medium mb-2">{exchange?.productA?.description || 'Item'}</p>
             {exchange?.productA?.images?.[0] && (
               <img
                 src={exchange.productA.images[0]}
-                alt="Product A"
+                alt="Product 'A'"
                 className="w-full h-40 rounded-xl object-cover border border-blue-200 cursor-pointer active:opacity-80"
                 onClick={() => setFullScreenImage(exchange.productA.images[0])}
               />
@@ -457,7 +503,7 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
             <p className="text-sm font-black text-red-600 mt-2">QC Rejected by Requestor</p>
             {exchange?.qcRejectionReason && <p className="text-xs text-red-400 mt-1">{exchange.qcRejectionReason}</p>}
           </div>
-          <p className="text-xs text-slate-500 text-center">Product B cannot be accepted. You must return Product A to the requestor safely.</p>
+          <p className="text-xs text-slate-500 text-center">Product 'B' cannot be accepted. You must return Product 'A' to the requestor safely.</p>
           <button onClick={() => update(BookingStatus.RETURNING_PRODUCT_A, { 'exchange.failureReason': 'qc_rejected' })} disabled={loading}
             className="w-full h-14 bg-amber-500 text-white font-black rounded-2xl shadow-lg flex items-center justify-center gap-2 disabled:opacity-50">
             <span className="material-symbols-outlined">assignment_return</span>RETURN PRODUCT A TO REQUESTOR
@@ -477,7 +523,7 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
           <div className="flex items-start gap-4">
             <div className="size-3 rounded-full bg-green-500 mt-1.5 shrink-0 ring-4 ring-green-500/10"></div>
             <div className="flex flex-col">
-              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Returning Product B to Requestor</span>
+              <span className="text-[10px] uppercase font-bold text-slate-400 tracking-widest">Returning Product 'B' to Requestor</span>
               <span className="text-sm font-bold dark:text-white">{trip.pickup?.address}</span>
             </div>
           </div>
@@ -494,7 +540,7 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
         <div className="flex flex-col gap-4">
           <div className="bg-amber-50 rounded-2xl p-3 flex items-center gap-2">
             <span className="material-symbols-outlined text-amber-500">assignment_return</span>
-            <span className="text-xs font-black text-amber-600 uppercase tracking-widest">Returning Product A (Exchange Failed)</span>
+            <span className="text-xs font-black text-amber-600 uppercase tracking-widest">Returning Product 'A' (Exchange Failed)</span>
           </div>
           <div className="flex items-start gap-4">
             <div className="size-3 rounded-full bg-amber-500 mt-1.5 shrink-0 ring-4 ring-amber-500/10"></div>

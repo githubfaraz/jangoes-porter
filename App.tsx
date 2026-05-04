@@ -25,6 +25,7 @@ import ExchangeDetails from './screens/customer/ExchangeDetails.tsx';
 
 // Driver Screens
 import DriverDashboard from './screens/driver/Dashboard.tsx';
+import TripRequestOverlay from './screens/driver/TripRequestOverlay.tsx';
 import DriverPayouts from './screens/driver/Payouts.tsx';
 import DriverProfile from './screens/driver/Profile.tsx';
 import RegistrationFlow from './screens/driver/RegistrationFlow.tsx';
@@ -35,6 +36,7 @@ import PendingVerification from './screens/driver/PendingVerification.tsx';
 import HelpSupport from './screens/shared/HelpSupport.tsx';
 import ChatScreen from './screens/shared/ChatScreen.tsx';
 import OrderHistory from './screens/shared/OrderHistory.tsx';
+import TripDetails from './screens/shared/TripDetails.tsx';
 import SetupProfile from './screens/shared/SetupProfile.tsx';
 
 const App: React.FC = () => {
@@ -173,6 +175,7 @@ const App: React.FC = () => {
               <Route path="/help" element={<HelpSupport />} />
               <Route path="/chat" element={<ChatScreen />} />
               <Route path="/activity" element={<OrderHistory />} />
+              <Route path="/trip-details" element={<TripDetails />} />
 
               {userRole === UserRole.CUSTOMER ? (
                 <>
@@ -231,6 +234,9 @@ const App: React.FC = () => {
         </Routes>
         
         {isLoggedIn && ((userRole === UserRole.CUSTOMER && isProfileComplete) || (userRole === UserRole.DRIVER && isKycDone && isKycVerified)) && <BottomNav role={userRole} />}
+
+        {/* App-level new-trip popup — shows on every screen, not just /dashboard */}
+        {isLoggedIn && userRole === UserRole.DRIVER && isKycDone && isKycVerified && <TripRequestOverlay />}
       </div>
     </HashRouter>
   );

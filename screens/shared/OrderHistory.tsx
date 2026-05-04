@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { auth, db } from '../../src/firebase.ts';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
 import { BookingStatus, Trip } from '../../types.ts';
+import { buildBookAgainState } from '../../src/bookAgain.ts';
 
 const ONGOING_STATUSES = [
   BookingStatus.SEARCHING, BookingStatus.ACCEPTED, BookingStatus.ARRIVED_AT_PICKUP,
@@ -15,46 +16,60 @@ const ONGOING_STATUSES = [
   BookingStatus.ARRIVED_AT_ORIGIN_RETURN,
 ];
 
+const PAST_STATUSES = [
+  BookingStatus.COMPLETED, BookingStatus.CANCELLED,
+  BookingStatus.EXCHANGE_COMPLETED, BookingStatus.EXCHANGE_FAILED,
+];
+
+const VEHICLE_LABEL: Record<string, string> = {
+  bike: '2 Wheeler',
+  car: '4 Wheeler',
+  'tata-ace': 'Mini Truck',
+  bolero: 'Pickup Truck',
+  'tata-407': 'Medium Truck',
+  'large-truck': 'Large Truck',
+};
+
+const VEHICLE_ICON: Record<string, string> = {
+  bike: 'two_wheeler',
+  car: 'directions_car',
+  'tata-ace': 'local_shipping',
+  bolero: 'local_shipping',
+  'tata-407': 'local_shipping',
+  'large-truck': 'local_shipping',
+};
+
+function vehicleLabel(v?: string): string {
+  if (!v) return 'Delivery';
+  return VEHICLE_LABEL[v] || v;
+}
+
+function vehicleIcon(v?: string): string {
+  if (!v) return 'local_shipping';
+  return VEHICLE_ICON[v] || 'local_shipping';
+}
+
 function formatDate(ts: any): string {
   if (!ts) return '';
   const d = ts?.toDate ? ts.toDate() : new Date(ts);
   return d.toLocaleDateString('en-IN', { day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-function statusLabel(s: BookingStatus): string {
-  switch (s) {
-    case BookingStatus.SEARCHING: return 'Searching';
-    case BookingStatus.ACCEPTED: return 'Driver Assigned';
-    case BookingStatus.ARRIVED_AT_PICKUP: return 'At Pickup';
-    case BookingStatus.PICKING_UP: return 'Picking Up';
-    case BookingStatus.IN_TRANSIT: return 'In Transit';
-    case BookingStatus.ARRIVED_AT_DESTINATION: return 'At Destination';
-    case BookingStatus.DROPPING_OFF: return 'Dropping Off';
-    case BookingStatus.COMPLETED: return 'Delivered';
-    case BookingStatus.CANCELLED: return 'Cancelled';
-    case BookingStatus.ARRIVED_AT_RECEIVER: return 'At Receiver';
-    case BookingStatus.PICKING_UP_PRODUCT_B: return 'Collecting Product B';
-    case BookingStatus.QC_PENDING: return 'QC Review';
-    case BookingStatus.QC_APPROVED: return 'QC Approved';
-    case BookingStatus.QC_REJECTED: return 'QC Rejected';
-    case BookingStatus.RETURNING_PRODUCT_B: return 'Returning Product B';
-    case BookingStatus.RETURNING_PRODUCT_A: return 'Returning Product A';
-    case BookingStatus.ARRIVED_AT_ORIGIN_RETURN: return 'At Origin';
-    case BookingStatus.EXCHANGE_COMPLETED: return 'Exchange Done';
-    case BookingStatus.EXCHANGE_FAILED: return 'Exchange Failed';
-    default: return s;
+function statusPill(s: BookingStatus): { label: string; color: string; icon: string } {
+  if (s === BookingStatus.COMPLETED || s === BookingStatus.EXCHANGE_COMPLETED) {
+    return { label: 'Completed', color: 'text-green-600', icon: 'check_circle' };
   }
-}
-
-function statusStyle(s: BookingStatus): string {
-  if (s === BookingStatus.COMPLETED || s === BookingStatus.EXCHANGE_COMPLETED) return 'bg-green-100 text-green-700 dark:bg-green-900/30 dark:text-green-400';
-  if (s === BookingStatus.CANCELLED || s === BookingStatus.EXCHANGE_FAILED) return 'bg-red-100 text-red-700 dark:bg-red-900/30 dark:text-red-400';
-  return 'bg-blue-100 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400';
+  if (s === BookingStatus.CANCELLED) {
+    return { label: 'Cancelled', color: 'text-red-500', icon: 'cancel' };
+  }
+  if (s === BookingStatus.EXCHANGE_FAILED) {
+    return { label: 'Exchange Failed', color: 'text-amber-600', icon: 'error' };
+  }
+  return { label: 'Ongoing', color: 'text-blue-600', icon: 'pending' };
 }
 
 const OrderHistory: React.FC = () => {
   const navigate = useNavigate();
-  const [activeTab, setActiveTab] = useState<'ongoing' | 'history'>('ongoing');
   const [trips, setTrips] = useState<(Trip & { id: string })[]>([]);
   const [loading, setLoading] = useState(true);
 
@@ -62,7 +77,6 @@ const OrderHistory: React.FC = () => {
     const user = auth.currentUser;
     if (!user) { setLoading(false); return; }
 
-    // Listen for trips where user is customer OR driver
     const customerQ = query(collection(db, 'trips'), where('customerId', '==', user.uid));
     const driverQ = query(collection(db, 'trips'), where('driverId', '==', user.uid));
 
@@ -94,117 +108,130 @@ const OrderHistory: React.FC = () => {
   }, []);
 
   const ongoing = trips.filter(t => ONGOING_STATUSES.includes(t.status));
-  const history = trips.filter(t => [BookingStatus.COMPLETED, BookingStatus.CANCELLED, BookingStatus.EXCHANGE_COMPLETED, BookingStatus.EXCHANGE_FAILED].includes(t.status));
-  const display = activeTab === 'ongoing' ? ongoing : history;
+  const past = trips.filter(t => PAST_STATUSES.includes(t.status));
 
   return (
     <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
-      <header className="sticky top-0 z-20 bg-white/95 dark:bg-background-dark/95 backdrop-blur-sm border-b dark:border-slate-800 px-4 py-3">
-        <h2 className="text-lg font-black text-center text-slate-900 dark:text-white">My Orders</h2>
+      <header className="px-5 pt-12 pb-3 bg-white dark:bg-background-dark">
+        <h1 className="text-2xl font-black text-slate-900 dark:text-white">Orders</h1>
       </header>
 
-      {/* Tabs */}
-      <div className="flex gap-3 px-4 pt-4">
-        {(['ongoing', 'history'] as const).map(tab => (
-          <button
-            key={tab}
-            onClick={() => setActiveTab(tab)}
-            className={`flex-1 py-3 rounded-2xl font-black text-xs uppercase tracking-widest transition-all ${
-              activeTab === tab
-                ? 'bg-primary text-white shadow-lg shadow-primary/20'
-                : 'bg-slate-100 dark:bg-slate-800 text-slate-500'
-            }`}
-          >
-            {tab === 'ongoing' ? `Ongoing (${ongoing.length})` : `History (${history.length})`}
-          </button>
-        ))}
-      </div>
-
-      {/* List */}
-      <div className="flex-1 overflow-y-auto no-scrollbar px-4 py-4 pb-32 space-y-3">
+      <div className="flex-1 overflow-y-auto no-scrollbar pb-32">
         {loading ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400">
             <div className="w-8 h-8 border-4 border-slate-200 border-t-primary rounded-full animate-spin" />
             <span className="text-sm font-bold">Loading orders...</span>
           </div>
-        ) : display.length === 0 ? (
+        ) : trips.length === 0 ? (
           <div className="flex flex-col items-center justify-center py-20 gap-3 text-slate-400">
             <span className="material-symbols-outlined text-5xl">inbox</span>
-            <span className="text-sm font-bold">{activeTab === 'ongoing' ? 'No active orders' : 'No order history'}</span>
+            <span className="text-sm font-bold">No orders yet</span>
           </div>
         ) : (
-          display.map(trip => (
-            <div
-              key={trip.id}
-              onClick={() => {
-                if (ONGOING_STATUSES.includes(trip.status)) {
-                  navigate('/tracking', { state: { tripId: trip.id } });
-                }
-              }}
-              className={`bg-white dark:bg-slate-900 rounded-2xl p-4 border border-slate-100 dark:border-slate-800 shadow-sm ${ONGOING_STATUSES.includes(trip.status) ? 'cursor-pointer active:scale-[0.99] transition-transform' : ''}`}
-            >
-              <div className="flex items-center justify-between mb-3">
-                <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest">
-                  {trip.vehicleType || 'Delivery'}
-                </span>
-                <span className={`text-[9px] font-black px-2.5 py-1 rounded-full uppercase tracking-widest ${statusStyle(trip.status)}`}>
-                  {statusLabel(trip.status)}
-                </span>
-              </div>
-
-              {trip.serviceType === 'exchange' ? (
-                <div className="flex flex-col gap-3 relative pl-1 mb-3">
-                  <div className="absolute left-[5px] top-2 bottom-2 w-0.5 bg-slate-100 dark:bg-slate-800"></div>
-                  <div className="flex items-start gap-3 relative">
-                    <div className="size-3 rounded-full bg-green-500 shrink-0 z-10 mt-0.5 ring-2 ring-white dark:ring-slate-900"></div>
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Leg 1 — Pickup Product A</span>
-                      <span className="text-sm font-bold text-slate-900 dark:text-white truncate">{trip.pickup?.address || 'Pickup'}</span>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3 relative">
-                    <div className="size-3 rounded-full bg-amber-500 shrink-0 z-10 mt-0.5 ring-2 ring-white dark:ring-slate-900"></div>
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Leg 2 — Exchange at Receiver</span>
-                      <span className="text-sm font-bold text-slate-900 dark:text-white truncate">{trip.dropoff?.address || 'Receiver'}</span>
-                    </div>
-                  </div>
-                  <div className="flex items-start gap-3 relative">
-                    <div className="size-3 rounded-full bg-blue-500 shrink-0 z-10 mt-0.5 ring-2 ring-white dark:ring-slate-900"></div>
-                    <div className="flex flex-col min-w-0">
-                      <span className="text-[9px] font-black text-slate-400 uppercase tracking-widest">Leg 3 — Return to Sender</span>
-                      <span className="text-sm font-bold text-slate-900 dark:text-white truncate">{trip.pickup?.address || 'Sender'}</span>
-                    </div>
-                  </div>
+          <>
+            {/* Ongoing — kept above Past so customers can still jump back into an active trip */}
+            {ongoing.length > 0 && (
+              <>
+                <div className="bg-slate-100 dark:bg-slate-800/40 px-5 py-2.5">
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Ongoing</span>
                 </div>
-              ) : (
-                <div className="flex flex-col gap-3 relative pl-1 mb-3">
-                  <div className="absolute left-[5px] top-2 bottom-2 w-0.5 bg-slate-100 dark:bg-slate-800"></div>
-                  <div className="flex items-start gap-3 relative">
-                    <div className="size-3 rounded-full bg-green-500 shrink-0 z-10 mt-0.5 ring-2 ring-white dark:ring-slate-900"></div>
-                    <span className="text-sm font-bold text-slate-900 dark:text-white truncate">{trip.pickup?.address || 'Pickup'}</span>
-                  </div>
-                  <div className="flex items-start gap-3 relative">
-                    <div className="size-3 rounded-full bg-red-500 shrink-0 z-10 mt-0.5 ring-2 ring-white dark:ring-slate-900"></div>
-                    <span className="text-sm font-bold text-slate-900 dark:text-white truncate">{trip.dropoff?.address || 'Drop'}</span>
-                  </div>
-                </div>
-              )}
+                {ongoing.map(trip => (
+                  <button
+                    key={trip.id}
+                    onClick={() => navigate('/tracking', { state: { tripId: trip.id } })}
+                    className="w-full text-left bg-white dark:bg-slate-900 px-5 py-4 border-b border-slate-100 dark:border-slate-800 active:bg-slate-50 dark:active:bg-slate-800/60 transition-colors"
+                  >
+                    <div className="flex items-center gap-3">
+                      <span className="material-symbols-outlined text-primary text-2xl">{vehicleIcon(trip.vehicleType)}</span>
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-bold text-slate-900 dark:text-white">{vehicleLabel(trip.vehicleType)}</p>
+                        <p className="text-xs text-slate-400">{formatDate(trip.createdAt)}</p>
+                      </div>
+                      <div className="flex items-center gap-1">
+                        <span className="text-sm font-black text-slate-900 dark:text-white">₹{trip.fare?.toFixed(0) || '0'}</span>
+                        <span className="material-symbols-outlined text-slate-400">chevron_right</span>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </>
+            )}
 
-              <div className="flex items-center justify-between pt-2 border-t border-slate-50 dark:border-slate-800">
-                <span className="text-xs text-slate-400 font-medium">{formatDate(trip.createdAt)}</span>
-                <span className="text-sm font-black text-slate-900 dark:text-white">₹{trip.fare?.toFixed(2) || '0.00'}</span>
-              </div>
-
-              {trip.rating && (
-                <div className="flex items-center gap-1 mt-2">
-                  {[1, 2, 3, 4, 5].map(i => (
-                    <span key={i} className={`material-symbols-outlined text-sm ${i <= trip.rating! ? 'text-amber-400 filled' : 'text-slate-200'}`}>star</span>
-                  ))}
+            {/* Past */}
+            {past.length > 0 && (
+              <>
+                <div className="bg-slate-100 dark:bg-slate-800/40 px-5 py-2.5 mt-px">
+                  <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Past</span>
                 </div>
-              )}
-            </div>
-          ))
+                <div className="bg-white dark:bg-slate-900">
+                  {past.map((trip, idx) => {
+                    const pill = statusPill(trip.status);
+                    const isFirst = idx === 0;
+                    return (
+                      <div key={trip.id} className={`px-5 pt-4 pb-5 ${!isFirst ? 'border-t-8 border-slate-100 dark:border-slate-800/40' : ''}`}>
+                        {/* Header row: vehicle icon + label + date + fare + chevron */}
+                        <button
+                          onClick={() => navigate('/trip-details', { state: { tripId: trip.id } })}
+                          className="w-full flex items-center gap-3 mb-3 text-left active:opacity-80 transition-opacity"
+                        >
+                          <div className="size-12 rounded-full bg-blue-50 dark:bg-blue-900/20 flex items-center justify-center shrink-0">
+                            <span className="material-symbols-outlined text-primary text-2xl">{vehicleIcon(trip.vehicleType)}</span>
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-base font-bold text-slate-900 dark:text-white">{vehicleLabel(trip.vehicleType)}</p>
+                            <p className="text-xs text-slate-400">{formatDate(trip.createdAt)}</p>
+                          </div>
+                          <div className="flex items-center gap-1 shrink-0">
+                            <span className="text-base font-black text-slate-900 dark:text-white">₹{trip.fare?.toFixed(0) || '0'}</span>
+                            <span className="material-symbols-outlined text-slate-400">chevron_right</span>
+                          </div>
+                        </button>
+
+                        {/* Address card */}
+                        <div className="bg-slate-50 dark:bg-slate-800/40 rounded-2xl p-4 mb-3">
+                          <div className="flex gap-3">
+                            <div className="flex flex-col items-center pt-2 shrink-0">
+                              <span className="size-2.5 rounded-full bg-green-500"></span>
+                              <span className="w-px flex-1 bg-slate-300 dark:bg-slate-600 my-1 min-h-[28px] border-l border-dashed border-slate-300 dark:border-slate-600"></span>
+                              <span className="size-2.5 rounded-full bg-red-500"></span>
+                            </div>
+                            <div className="flex-1 min-w-0 flex flex-col gap-3">
+                              <div>
+                                <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                                  {trip.senderName || 'Sender'}{trip.senderPhone ? ` • ${trip.senderPhone}` : ''}
+                                </p>
+                                <p className="text-xs text-slate-500 truncate">{trip.pickup?.address || '—'}</p>
+                              </div>
+                              <div>
+                                <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                                  {trip.receiverName || 'Receiver'}{trip.receiverPhone ? ` • ${trip.receiverPhone}` : ''}
+                                </p>
+                                <p className="text-xs text-slate-500 truncate">{trip.dropoff?.address || '—'}</p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+
+                        {/* Status + Book Again row */}
+                        <div className="flex items-center justify-between gap-3">
+                          <div className={`flex items-center gap-1.5 ${pill.color}`}>
+                            <span className="material-symbols-outlined text-base">{pill.icon}</span>
+                            <span className="text-sm font-bold">{pill.label}</span>
+                          </div>
+                          <button
+                            onClick={() => navigate('/summary', { state: buildBookAgainState(trip) })}
+                            className="px-6 h-10 bg-primary text-white text-sm font-bold rounded-xl active:scale-[0.98] transition-transform"
+                          >
+                            Book Again
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </>
         )}
       </div>
     </div>
