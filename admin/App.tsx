@@ -10,6 +10,7 @@ import Trips from './screens/Trips';
 import Drivers from './screens/Drivers';
 import Customers from './screens/Customers';
 import FareConfig from './screens/FareConfig';
+import Coupons from './screens/Coupons';
 import AdminUsers from './screens/AdminUsers';
 import ActivityLogs from './screens/ActivityLogs';
 import ServiceConfig from './screens/ServiceConfig';
@@ -91,6 +92,7 @@ function AdminRoutes() {
           <Route path="/drivers" element={<ProtectedRoute permission="drivers"><Drivers /></ProtectedRoute>} />
           <Route path="/customers" element={<ProtectedRoute permission="customers"><Customers /></ProtectedRoute>} />
           <Route path="/fare-config" element={<ProtectedRoute permission="fare_config"><FareConfig /></ProtectedRoute>} />
+          <Route path="/coupons" element={<ProtectedRoute permission="coupons"><Coupons /></ProtectedRoute>} />
           <Route path="/admin-users" element={<SuperAdminRoute><AdminUsers /></SuperAdminRoute>} />
           <Route path="/activity-logs" element={<SuperAdminRoute><ActivityLogs /></SuperAdminRoute>} />
           <Route path="/service-config" element={<SuperAdminRoute><ServiceConfig /></SuperAdminRoute>} />

@@ -17,6 +17,8 @@ export const PERMISSIONS: AdminPermissionDef[] = [
   { key: 'customers',       label: 'View Customers',       description: 'View customer list',                  group: 'Customers' },
   { key: 'fare_config',     label: 'View Fare Config',     description: 'View fare rate configuration',        group: 'Fare Config' },
   { key: 'fare_config.edit',label: 'Edit Fare Config',     description: 'Modify vehicle fare rates',           group: 'Fare Config' },
+  { key: 'coupons',         label: 'View Coupons',         description: 'View coupon list and usage',          group: 'Coupons' },
+  { key: 'coupons.edit',    label: 'Manage Coupons',       description: 'Create, edit, delete, activate',      group: 'Coupons' },
 ];
 
 export const PERMISSION_GROUPS = [...new Set(PERMISSIONS.map(p => p.group))];
