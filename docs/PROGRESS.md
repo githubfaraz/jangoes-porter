@@ -36,6 +36,187 @@ Notes on the fields:
 
 ---
 
+## 2026-05-04 — Session wrap-up
+
+A large session — eight discrete batches landed in `main` plus one Firebase Console change. Entries below have full per-batch detail; this is the index.
+
+**Done (in chronological order)**
+1. **`/api/driver-availability` diagnosis + fix** — switched to `roles array-contains DRIVER`, returns 503 on backend failure, `VehicleSelection` distinguishes outage from genuine zero-supply. *(Commit `bd9dcdf`)*
+2. **Customer Tracking: Exchange post-accept layout + WhatsApp share** — new layout from `EXTRAS/customer-view-after-driver-accepts-trip.jpeg` with Trip CRN header, Info + Share buttons (WhatsApp `wa.me/?text=…`), driver/address cards, View Details bottom sheet. Per-trip share URL `jangoes.com/rd/<tripId>`. *(Commit `b53c90a`)*
+3. **Five-pack** — 2-min ETA "Your Vehicle is here!" banner, receiver OTP fired on Exchange pickup (parity with Parcel), Product A/B → Product 'A' / 'B' across UI, Exchange completion rating screen, driver-side Product 'B' reference photo card with lightbox.
+4. **Four-pack** — Parcel/Exchange progress-timeline sync (added "Driver at Pickup" step to Exchange, terminal-state coverage, failure-path label swaps), parcel image preview at dropoff in `ActiveTrip`, driver new-trip popup lifted to App-level (`TripRequestOverlay` + shared `useDriverOnline`), Order History redesign + new Trip Details screen.
+5. **Three-pack enhancements** — Book Again now pre-fills Order Summary, Mail Invoice posts to a new `/api/email-invoice` (Nodemailer/SMTP), full coupon system (validate + redeem endpoints, OrderSummary input, fare-breakdown discount line on both screens, `couponCode`/`couponDiscount` on `Trip`).
+6. **Admin coupon CRUD + active-flag enforcement** — new `/coupons` page with table, Add/Edit modal, delete confirm, activate/deactivate toggle, all logged via `logAdminAction`. New `coupons` + `coupons.edit` permissions; sidebar nav. `/api/validate-coupon` rejects `active === false`.
+7. **Firestore rules update** *(in Firebase Console, not repo)* — added `match /coupons/{code}` admin-only rule + fixed `isAdmin()` to check `roles` array (matches `useAdminAuth.tsx:53-54`).
+
+**In progress**
+- _(none — repo is clean except for `.claude/settings.local.json` harness config)_
+
+**Next**
+- User testing of the day's changes end-to-end before further feature work.
+- When ready: provision SMTP credentials in `.env` (see "Open questions" below) so Mail Invoice actually sends.
+
+**Open questions / pending caveats** (carried forward — none introduced this session beyond what was logged in each batch)
+- **SMTP credentials for Mail Invoice.** Endpoint returns `503 { error: 'email_not_configured' }` until `SMTP_HOST`, `SMTP_PORT`, `SMTP_USER`, `SMTP_PASS`, `SMTP_FROM` are set in `.env`. Easiest path: Gmail App Password (https://myaccount.google.com/apppasswords) with `SMTP_HOST=smtp.gmail.com`, `SMTP_PORT=465`. Restart `npm run dev` after.
+- **DLT template for receiver pickup OTP** — driver Exchange flow now sends an SMS to the receiver on pickup, but the body is the existing generic delivery-OTP template (decision (b) made earlier today). When you register a new DLT template with the desired text ("Hi, I am sending you a packet via jangoes 2 wheeler. You can track…"), swap `SMS_TEMPLATE_ID` (or add `SMS_RECEIVER_PICKUP_TEMPLATE_ID`).
+- **Receiver-side `jangoes.com/rd/<tripId>` tracking page** — share URL is correctly per-trip but currently a dead link. Browser fallback + Capacitor deep-link handoff to the installed app is a separate workstream.
+- **"Book Again" doesn't pre-fill earlier flow screens** — jumps straight to `/summary`. Pre-filling `SearchLocation` → `ParcelDetails` → etc. would require threading initial state through each step.
+- **Coupon `usedCount` not strictly idempotent** — repeat redeem-calls (e.g. user double-taps Confirm Booking before navigation) could double-increment. Acceptable for MVP; tighten via Firestore transaction or Cloud Function later.
+- **Firestore rules live only in the Firebase Console**, not in the repo. Any new collection needs a rule added there — easy to forget. Consider a `firestore.rules` file checked in next to a `firebase.json` for traceability.
+
+**Files touched today**
+- **New code:** `screens/driver/TripRequestOverlay.tsx`, `screens/shared/TripDetails.tsx`, `src/driverOnline.ts`, `src/bookAgain.ts`, `admin/screens/Coupons.tsx`
+- **Modified code:** `App.tsx`, `server.ts`, `types.ts`, `screens/customer/Tracking.tsx`, `screens/customer/VehicleSelection.tsx`, `screens/customer/ExchangeDetails.tsx`, `screens/customer/OrderSummary.tsx`, `screens/driver/ActiveTrip.tsx`, `screens/driver/ExchangeTrip.tsx`, `screens/driver/Dashboard.tsx`, `screens/shared/OrderHistory.tsx`, `admin/App.tsx`, `admin/rbac.ts`, `admin/screens/Layout.tsx`
+- **Dependencies:** `nodemailer` + `@types/nodemailer` added (`package.json` / `package-lock.json`)
+- **Outside the repo:** Firestore security rules updated in the Firebase Console (added `coupons` rule + `isAdmin()` fix)
+- **Docs:** `docs/PROGRESS.md` (this and seven prior entries today)
+
+---
+
+## 2026-05-04 — Firestore rules: coupons access + isAdmin() fix
+
+**Done**
+- Published updated Firestore security rules in the Firebase Console (jangoes-porter project). Two changes:
+  - **Added `match /coupons/{code} { allow read, write: if isAdmin(); }`** — admin SPA's `onSnapshot(collection(db, 'coupons'))` was hitting `permission-denied` because the new collection had no rule. Customers don't need direct read access; the server (`/api/validate-coupon`, `/api/redeem-coupon`) uses the Admin SDK, which bypasses rules.
+  - **Fixed `isAdmin()` to check the `roles` array, not just the legacy `role` string.** New form:
+    ```
+    function isAdmin() {
+      let user = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return user.roles.hasAny(['ADMIN']) || user.role == 'ADMIN';
+    }
+    ```
+  - **Why the fix mattered:** `OTPScreen.tsx:139` and `App.tsx:125` rewrite `role` to whatever the user picked on the login toggle. An admin who logged into the customer-facing app and picked "Customer" would have `role: 'CUSTOMER'` — losing admin database access until next admin login, even though `roles: ['ADMIN', ...]` still included it. The admin SPA's auth hook (`useAdminAuth.tsx:53-54`) was already tolerant; the rules now match.
+
+**Caveats / follow-up**
+- This is a setup-step pattern: **any new Firestore collection added in code needs a corresponding rule in the Firebase Console.** Default-deny.
+- Rules live only in the Firebase Console — not checked into the repo. Worth noting in CLAUDE.md so future sessions know to flag this.
+
+**Files touched**
+- _(none — Firestore rules edited in Firebase Console directly)_
+- `docs/PROGRESS.md` — this entry
+
+---
+
+## 2026-05-04 — Admin coupon CRUD + active-flag enforcement
+
+**Done**
+- **Admin coupon management screen** at `/coupons` (admin SPA). New `admin/screens/Coupons.tsx`:
+  - Live list of all `coupons/{CODE}` docs via `onSnapshot`. Table view: Code (mono), Discount ("₹X off" / "X% off"), Valid window, Usage (`used / limit` or `used`), Min Order, Active toggle, Edit/Delete buttons.
+  - Stat tiles at the top: Total / Active / Limit-reached counts.
+  - **Add Coupon** modal: code (uppercased; doc ID; validated for `^[A-Z0-9_-]{2,32}$`), Type (Flat ₹ / Percent), Value, Valid From / Until (datetime-local), Usage Limit (blank = unlimited), Min Order, Active toggle. Guards against overwriting an existing code via `getDoc` check before `setDoc`.
+  - **Edit** reuses the modal with code field disabled. Preserves `usedCount` + `createdAt` + `createdBy`.
+  - **Delete** confirms via a small modal, then `deleteDoc`. Notes that past redemptions are unaffected.
+  - **Activate/Deactivate** via inline toggle on each row. Just flips `coupons/{CODE}.active`.
+  - Every mutation logged via `logAdminAction` (actions: `coupon.created`, `coupon.updated`, `coupon.deleted`, `coupon.activated`, `coupon.deactivated`).
+- **RBAC integration.** New `coupons` (view) and `coupons.edit` (create/update/delete/toggle) permissions in `admin/rbac.ts`. Read-only admins still see the table; write operations are hidden when `coupons.edit` not granted (no Add button, no Edit/Delete icons, toggle disabled).
+- **Nav + route.** Layout sidebar gets a "Coupons" entry (icon `local_offer`) gated by the `coupons` permission. Route `/coupons` registered in `admin/App.tsx` with `ProtectedRoute`.
+- **Server now honors the `active` flag.** `/api/validate-coupon` (`server.ts`) rejects with `reason: 'Coupon is currently inactive'` when `c.active === false`. Backwards-compat: coupons created before this rollout don't have the field; absent === active. Only an explicit `false` disables.
+
+**Caveats**
+- New permissions (`coupons`, `coupons.edit`) need to be granted to existing non-Super-Admin admins via `/admin-users`. Super Admins inherit all permissions, so they get coupon access automatically.
+- `usedCount` increment via `/api/redeem-coupon` remains non-idempotent (flagged earlier) — admin UI doesn't change this.
+
+**Files touched**
+- `admin/screens/Coupons.tsx` — new (CRUD + activate/deactivate)
+- `admin/rbac.ts` — added `coupons` + `coupons.edit` permissions
+- `admin/screens/Layout.tsx` — added Coupons nav item + page title
+- `admin/App.tsx` — registered `/coupons` route
+- `server.ts` — validate-coupon now rejects `active === false`
+- `docs/PROGRESS.md` — this entry
+
+---
+
+## 2026-05-04 — Three-pack enhancements: Book Again pre-fill + Mail Invoice email + Coupon system
+
+**Done**
+- **Book Again now skips the booking flow.** New `src/bookAgain.ts` with `buildBookAgainState(trip)` that maps a stored Trip doc → the `location.state` shape `OrderSummary` already accepts (pickup/drop with name+phone, vehicle, parcel/dimensions, exchange + reference photos, serviceType, fare). Wired into both `OrderHistory.tsx` and `TripDetails.tsx` Book Again buttons — clicking now jumps the customer straight to `/summary` one tap away from re-booking the same trip. No fetch needed (both screens already have the trip in memory).
+- **Mail Invoice now sends a real email.** Installed `nodemailer`. New `POST /api/email-invoice` (`server.ts`) fetches the trip, renders an HTML invoice (CRN, addresses, vehicle, fare-detail table mirroring the Trip Details screen — including the coupon line and rounding row when applicable), and sends via SMTP using the env vars below. Returns **503 with `error: 'email_not_configured'`** when SMTP credentials aren't present so the client can show a useful toast. `TripDetails.tsx` Mail Invoice button is now async (POSTs to the endpoint, shows "Sending…" spinner, alerts on success/failure). Falls back to prompting for an email if `auth.currentUser.email` is empty (OTP-only customers).
+- **Coupon system (minimal MVP).** Added `couponCode` + `couponDiscount` fields to the `Trip` type. Two new server endpoints in `server.ts`:
+  - `POST /api/validate-coupon` — reads `coupons/{CODE}` (uppercased), validates `validFrom`/`validUntil`/`usageLimit`/`minOrderAmount`, computes discount (`flat` or `percent`), caps it at the order amount so total never goes negative. Returns `{ valid, code, discount, discountType }` or `{ valid: false, reason }`.
+  - `POST /api/redeem-coupon` — atomically increments `usedCount` via `FieldValue.increment(1)`. Called best-effort by the client right after a successful trip creation; failure is silent (under-counts rather than blocks the booking).
+  - `OrderSummary.tsx` got a "Have a coupon code?" card between Vehicle and Fare Breakdown — input + Apply button → validates → on success swaps to a green "CODE applied / You saved ₹X" pill with Remove button. Errors render below the input. The fare breakdown shows a green `−₹X.XX` "Coupon discount (CODE)" line when applied. `finalFare = max(0, fare − couponDiscount)` is now what's used for the wallet auto-select check, the "Confirm Booking • ₹X" CTA, and the saved `trip.fare`. The pre-discount `estimatedTripFare` and the coupon details are persisted separately so the breakdown can reconstruct.
+  - `TripDetails.tsx` fare breakdown now shows the same green "Coupon discount (CODE)" line when `trip.couponDiscount > 0`, and the rounding calc accounts for it.
+
+**TODO — provision SMTP credentials**
+- Mail Invoice currently returns 503 with `error: 'email_not_configured'` until you set these in `.env`:
+  ```
+  SMTP_HOST=smtp.gmail.com           # or smtp.sendgrid.net, smtp.resend.com, etc.
+  SMTP_PORT=465                       # 465 (SSL) or 587 (STARTTLS)
+  SMTP_USER=invoices@yourdomain.com  # or your Gmail address
+  SMTP_PASS=...                       # Gmail App Password (https://myaccount.google.com/apppasswords) or provider API key
+  SMTP_FROM=Jangoes Porter <invoices@yourdomain.com>   # optional, defaults to SMTP_USER
+  ```
+  Then restart `npm run dev`. No code changes needed — the endpoint reads env at request time.
+
+**Caveats — known minor issues**
+- Coupon `usedCount` increment is not idempotent. If the redeem-call retries (user double-taps Confirm Booking before navigation), the coupon could be incremented twice. Acceptable for MVP; tighten with a Cloud Function or transaction if abuse becomes an issue.
+- No admin UI for coupons. You add them by writing docs to the `coupons` collection in the Firebase console: doc ID = the code (uppercase), shape `{ code, discountType: 'flat' | 'percent', discountValue, validFrom?, validUntil?, usageLimit?, usedCount?, minOrderAmount? }`.
+- Coupon discount is applied on the customer's displayed fare, but the **server-side `/api/validate-fare` check still validates the original (pre-discount) fare** — that's correct (the discount is a marketing concession, not the trip's actual cost). No change needed there.
+
+**Files touched**
+- `src/bookAgain.ts` — new helper
+- `screens/shared/OrderHistory.tsx` — Book Again wiring
+- `screens/shared/TripDetails.tsx` — Book Again wiring, Mail Invoice POST, coupon line in breakdown
+- `screens/customer/OrderSummary.tsx` — coupon UI + state, finalFare wiring, persist + redeem
+- `server.ts` — `nodemailer` import, `/api/email-invoice`, `/api/validate-coupon`, `/api/redeem-coupon`
+- `types.ts` — added `couponCode` + `couponDiscount` on `Trip`
+- `package.json` / `package-lock.json` — `nodemailer` + `@types/nodemailer`
+- `docs/PROGRESS.md` — this entry
+
+---
+
+## 2026-05-04 — Four-pack: timeline sync + Order History redesign + global driver popup + parcel preview at dropoff
+
+**Done**
+- **Customer timeline sync (Parcel + Exchange).** Audited each step's `done` condition vs status transitions in `Tracking.tsx`. Two real bugs fixed:
+  - **Exchange used to jump straight from "Driver Assigned" to "Product 'A' Picked Up"** — that step pulsed for the entire ACCEPTED/ARRIVED_AT_PICKUP/PICKING_UP window, before the driver had even reached the sender. Added an intermediate **"Driver at Pickup"** step. Applied to both the new bottom-sheet Exchange timeline and the legacy inline copy (which now only renders during SEARCHING but kept consistent for back-nav edge cases).
+  - **All step `done` arrays now include later/terminal statuses** (`COMPLETED`/`EXCHANGE_COMPLETED`/`EXCHANGE_FAILED`) so a brief moment before the rating screen takes over doesn't show a half-grey timeline.
+  - **Skipped steps no longer mis-anchor the active pulse.** When an Exchange fails (e.g. Product 'B' unavailable), the `product_b` step's label flips to "Product 'B' Skipped" + sub becomes "Receiver did not have it" / "Not collected", QC sub becomes "Skipped". The "Returning to You" sub already swapped to "Returning Product 'A'" via the existing `failureReason` check.
+- **Parcel image preview at dropoff (driver).** `ActiveTrip.tsx` `DROPPING_OFF` block now renders a primary-tinted card "Parcel you picked up" containing `trip.parcelImageUrl` (size-32 thumbnail). Tap → fullscreen lightbox modal (added `fullScreenImage` state + viewer at component bottom matching the `ExchangeTrip.tsx` pattern). Helps the driver verify they're handing over the right item.
+- **Driver new-trip popup now fires on every screen.** Previously only fired while `/dashboard` was mounted. Extracted listener + popup UI into a new `screens/driver/TripRequestOverlay.tsx` component, mounted at `App.tsx` whenever `userRole === DRIVER && isKycDone && isKycVerified`. The shared online-toggle state lives in a tiny module `src/driverOnline.ts` (sessionStorage-backed pub/sub with a `useDriverOnline` hook) so Dashboard's Online/Offline toggle still controls the listener. Dashboard kept its KYC subscription (used for the local pending-docs UI) but lost the GPS watcher, trip listener, accept handler, and inline modal — all owned by the overlay now.
+- **Order History redesign + new Trip Details screen.** Rewrote `screens/shared/OrderHistory.tsx` to match `EXTRAS/order-history-1.jpeg`: dropped the Ongoing/History tabs in favor of section dividers ("Ongoing" still shown above "Past" if any active trips exist, but Past is the focus). Past cards now have vehicle illustration + "2 Wheeler"-style label + date + fare + chevron header, sender + receiver address card with green/red dotted rail, "Completed" status pill on the left, blue "Book Again" CTA on the right. Tapping the chevron opens the new `screens/shared/TripDetails.tsx` (modeled on `EXTRAS/order-history-2.jpeg`): date + CRN + total header, driver row with vehicle icon + name + "category | RC" + 5-star rating, pickup/drop, fare details breakdown (uses `trip.finalFare` if present, falls back to `trip.fare`), payment details (cash/online/wallet), bottom action bar with **Mail Invoice** (`mailto:` with trip summary) and **Book Again** (`navigate('/home')`). Wired `/trip-details` route in `App.tsx`.
+
+**Caveats**
+- "Book Again" is a stub — navigates to `/home` so the user re-books from scratch. Pre-filling pickup/drop/vehicle would be the next step (needs threading through `SearchLocation` → `OrderSummary`).
+- Mail Invoice opens `mailto:` in the user's mail client (no server-side invoice PDF generation).
+- Trip Details "Coupon discount" line is omitted from the fare breakdown because no coupon system exists yet — when one lands, add a `couponDiscount` field to `Trip` and another conditional row in the breakdown.
+- `TripRequestOverlay` keeps its own KYC + GPS subscriptions (independent of Dashboard's). Slight resource duplication when both are mounted; acceptable to avoid lifting all of Dashboard's listeners into a Context.
+
+**Files touched**
+- `screens/customer/Tracking.tsx` — timeline `done` arrays + intermediate "Driver at Pickup" step + skipped-step label swap (both bottom-sheet and inline timelines)
+- `screens/driver/ActiveTrip.tsx` — parcel image preview + lightbox at dropoff
+- `screens/driver/Dashboard.tsx` — removed GPS/listener/popup, kept toggle wired to `useDriverOnline`
+- `screens/driver/TripRequestOverlay.tsx` — new, app-level popup
+- `src/driverOnline.ts` — new, shared online-toggle pub/sub
+- `App.tsx` — mount `<TripRequestOverlay>` when driver, register `/trip-details` route
+- `screens/shared/OrderHistory.tsx` — full rewrite to new design
+- `screens/shared/TripDetails.tsx` — new screen
+- `docs/PROGRESS.md` — this entry
+
+---
+
+## 2026-05-04 — Five-pack: ETA notif + receiver OTP + Product 'A'/'B' rename + Exchange rating + driver Product 'B' preview
+
+**Done**
+- **Exchange-pickup receiver OTP (Parcel parity).** `ExchangeTrip.tsx` PROCEED-TO-RECEIVER button now fires `/api/send-delivery-otp` to `receiverPhone` with `dropoffOtp` after the pickup PIN is verified (mirror of `ActiveTrip.tsx:181-184`). Per user direction, **reusing the existing DLT template** — receiver gets the generic delivery-OTP body, not the exact copy in the spec. If/when a new DLT template is registered with the desired text, swap `SMS_TEMPLATE_ID` (or add a per-flow env var).
+- **2-min proximity notification.** `Tracking.tsx`: new effect computes ETA = `haversineKm(driverLocation, target) * 1.4 / 25 * 60`. Target is `pickup` while pre-pickup, `dropoff` from `IN_TRANSIT` onward. When ETA ≤ 2 min, fires the existing in-app banner — "Your Vehicle is here! Our driver-partner <RC|name> is arriving at your <pickup|drop> location." Once-per-leg via a `useRef<{pickup, drop}>` latch (resets on full reload — acceptable). 6 s auto-dismiss. **In-app banner only**: FCM/native push isn't wired up in this repo; banner won't surface if the page is backgrounded.
+- **Product A / Product B → Product 'A' / Product 'B'.** Find/replace across 5 files: `Tracking.tsx`, `ExchangeTrip.tsx`, `ExchangeDetails.tsx`, `OrderHistory.tsx`, `OrderSummary.tsx`. Touched user-visible strings, JSX text, alt attributes, and prose comments — not schema field names (`productA`/`productB` keys preserved). Several JS string literals had to be re-quoted from `'…'` to `"…"` because the embedded `'A'`/`'B'` collided with the outer single quotes.
+- **Exchange completion rating screen.** Replaced the trivial "Exchange Successful! GO HOME" `EXCHANGE_COMPLETED` branch in `Tracking.tsx` with the layout from `EXTRAS/trip-completed-customer-screen.jpeg`: Skip button (top-right, navigates `/home` without saving), Paid ₹<fare> chip, driver photo, "How was your ride with <name>?", 5-star picker, optional feedback textarea, Need Help? card linking `/help`, Done button (saves `rating`/`feedback`/`ratedAt` to the trip doc, navigates `/home`). Done is disabled until a star is selected. `EXCHANGE_FAILED` keeps its existing failure screen — only success gets the rating.
+- **Driver views customer's Product 'B' reference photos at receiver.** `ExchangeTrip.tsx`: extracted a `renderProductBReferenceStrip()` local helper that reads `trip.exchange.productB.referencePhotos[]` (the path `OrderSummary.tsx:111` writes to). Renders an emerald-tinted card titled "Customer's Product 'B' reference photos" with size-20 thumbnails, each a button that calls the **already-existing** `setFullScreenImage` lightbox (line 605). Added the strip to the `ARRIVED_AT_RECEIVER` and `PICKING_UP_PRODUCT_B` blocks. Also wired clicks on the existing IN_TRANSIT thumbnail strip so those open in the lightbox too.
+
+**Caveats**
+- Exchange-pickup OTP body to the receiver does **not** match the spec text ("Hi, I am sending you a packet via jangoes 2 wheeler…") — it's whatever the existing DLT template says. Trigger logic is correct; copy is gated on a DLT template registration.
+- Proximity notification fires on best-effort ETA (haversine × 1.4 / 25 km/h). Not traffic-aware; rough but cheap. Could swap to `/api/distance-matrix` per location update if accuracy matters more than API cost.
+- Product 'A'/'B' replacement also touched alt text and code comments; field names like `productA`/`productB` and CSS class names were not affected.
+
+**Files touched**
+- `screens/driver/ExchangeTrip.tsx` — receiver-OTP fire on pickup, Product 'B' reference-photo strip + lightbox wiring at receiver stages, label rename
+- `screens/customer/Tracking.tsx` — 2-min proximity-notification effect + ref latch, Exchange rating screen replacing `EXCHANGE_COMPLETED`, label rename
+- `screens/customer/ExchangeDetails.tsx`, `screens/customer/OrderSummary.tsx`, `screens/shared/OrderHistory.tsx` — label rename
+- `docs/PROGRESS.md` — this entry
+
+---
+
 ## 2026-05-04 — Customer Tracking: Exchange post-accept layout + WhatsApp share
 
 **Done**
