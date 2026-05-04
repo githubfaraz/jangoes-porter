@@ -1,9 +1,88 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 import { db } from '../../src/firebase.ts';
-import { doc, onSnapshot, updateDoc } from 'firebase/firestore';
+import { doc, onSnapshot, updateDoc, getDoc, setDoc } from 'firebase/firestore';
 import { BookingStatus, Trip } from '../../types.ts';
 import { Map, AdvancedMarker } from '@vis.gl/react-google-maps';
+import { haversineKm } from '../../services/fareService.ts';
+
+// ── Exchange post-accept layout helpers ───────────────────────────────────────
+
+const VEHICLE_CATEGORY_LABEL: Record<string, string> = {
+  bike: '2 Wheeler',
+  car: '4 Wheeler',
+  'tata-ace': 'Mini Truck',
+  bolero: 'Pickup Truck',
+  'tata-407': 'Medium Truck',
+  'large-truck': 'Large Truck',
+};
+
+function vehicleCategoryLabel(category?: string): string {
+  if (!category) return 'Vehicle';
+  return VEHICLE_CATEGORY_LABEL[category] || category;
+}
+
+// Driver is "on the way to drop" once Product A has been picked up.
+const PRE_PICKUP_STATUSES: BookingStatus[] = [
+  BookingStatus.ACCEPTED,
+  BookingStatus.ARRIVED_AT_PICKUP,
+  BookingStatus.PICKING_UP,
+];
+
+// Active tracking range for the Exchange post-accept layout. Excludes
+// SEARCHING (still finding a driver), QC_PENDING (full-screen QC review),
+// and the two terminal EXCHANGE_* states (full-screen success/failure).
+const EXCHANGE_ACTIVE_STATUSES: BookingStatus[] = [
+  BookingStatus.ACCEPTED,
+  BookingStatus.ARRIVED_AT_PICKUP,
+  BookingStatus.PICKING_UP,
+  BookingStatus.IN_TRANSIT,
+  BookingStatus.ARRIVED_AT_RECEIVER,
+  BookingStatus.PICKING_UP_PRODUCT_B,
+  BookingStatus.QC_APPROVED,
+  BookingStatus.QC_REJECTED,
+  BookingStatus.RETURNING_PRODUCT_B,
+  BookingStatus.RETURNING_PRODUCT_A,
+  BookingStatus.ARRIVED_AT_ORIGIN_RETURN,
+];
+
+function formatTripCrn(id?: string): string {
+  if (!id) return 'CRN —';
+  // Trip docs don't have a separate CRN; surface the first 10 chars of the
+  // Firestore doc ID, uppercased, prefixed with CRN. Stable, unique, readable.
+  return `CRN ${id.slice(0, 10).toUpperCase()}`;
+}
+
+// 8-char uppercase alphanumeric, ambiguous chars (0/O, 1/I/L) excluded.
+function generateReferralCode(): string {
+  const chars = 'ABCDEFGHJKMNPQRSTUVWXYZ23456789';
+  let out = '';
+  for (let i = 0; i < 8; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  return out;
+}
+
+async function ensureReferralCode(uid: string): Promise<string> {
+  const ref = doc(db, 'users', uid);
+  const snap = await getDoc(ref);
+  const existing = snap.exists() ? (snap.data() as any).referralCode : undefined;
+  if (existing) return existing;
+  const code = generateReferralCode();
+  await setDoc(ref, { referralCode: code }, { merge: true });
+  return code;
+}
+
+function buildExchangeShareMessage(opts: {
+  vehicleLabel: string;
+  trackingUrl: string;
+  referralCode: string;
+}): string {
+  return `Hey, I'm sending you a package via Jangoes ${opts.vehicleLabel}! Never knew it would be this easy - Use Jangoes app for Trucks & 2-wheeler goods delivery.
+By the way, you can track the package and get Driver Partner's phone number here: ${opts.trackingUrl}
+
+Tip: You can use my referral code ${opts.referralCode} & avail upto Rs.100 Off on first 2 trips.
+
+Download Jangoes now!`;
+}
 
 const SEARCHING_MESSAGES = [
   'We are finding a driver for you...',
@@ -69,6 +148,20 @@ const Tracking: React.FC = () => {
   const [driverLocation, setDriverLocation] = useState<{ lat: number; lng: number } | null>(null);
   const [notification, setNotification] = useState<{ title: string; message: string } | null>(null);
   const prevStatusRef = useRef<string>('');
+
+  // Exchange post-accept layout state
+  const [showDetails, setShowDetails] = useState(false);
+  const [referralCode, setReferralCode] = useState<string>('');
+
+  // Load (or generate-and-persist) the customer's referral code once we
+  // know who the customer is. Used by the Share button's WhatsApp message.
+  useEffect(() => {
+    if (!trip?.customerId) return;
+    if (referralCode) return;
+    ensureReferralCode(trip.customerId)
+      .then(setReferralCode)
+      .catch(err => console.error('referralCode load failed:', err));
+  }, [trip?.customerId, referralCode]);
 
   useEffect(() => {
     if (!tripId) return;
@@ -353,6 +446,337 @@ const Tracking: React.FC = () => {
         >
           {isSubmittingRating ? 'Submitting...' : 'SUBMIT & GO HOME'}
         </button>
+      </div>
+    );
+  }
+
+  // ── Exchange post-accept layout ─────────────────────────────────────────────
+  // Replaces the default tracking layout for Exchange trips once a driver has
+  // accepted, until the trip reaches a terminal/QC-review state (handled
+  // above). Adds: trip CRN header, Info + Share buttons (WhatsApp), compact
+  // driver card, sender/receiver address card, and a View Details bottom
+  // sheet that holds the OTP, progress timeline, and Cancel action.
+  const isExchangeActive = trip?.serviceType === 'exchange'
+    && EXCHANGE_ACTIVE_STATUSES.includes(trip.status as BookingStatus);
+
+  if (isExchangeActive && trip) {
+    const isPrePickup = PRE_PICKUP_STATUSES.includes(trip.status as BookingStatus);
+    const statusText = isPrePickup ? 'Driver on the way to pick' : 'Driver on the way to drop';
+    const vehicleLabel = vehicleCategoryLabel(trip.vehicleType);
+    const trackingUrl = trip.id || tripId
+      ? `https://jangoes.com/rd/${trip.id || tripId}`
+      : 'https://jangoes.com';
+
+    // Show distance from driver to whichever leg they're heading to.
+    const target = isPrePickup ? trip.pickup : trip.dropoff;
+    const driverDistanceKm = (driverLocation && target?.lat && target?.lng)
+      ? haversineKm(driverLocation, { lat: target.lat, lng: target.lng })
+      : null;
+
+    const isReturnStage = [
+      BookingStatus.RETURNING_PRODUCT_B,
+      BookingStatus.RETURNING_PRODUCT_A,
+      BookingStatus.ARRIVED_AT_ORIGIN_RETURN,
+    ].includes(trip.status as BookingStatus);
+
+    const otp = isReturnStage
+      ? { label: 'Return OTP', value: trip.exchange?.returnOtp || '----', accentClass: 'amber' }
+      : { label: 'Pickup OTP', value: trip.pickupPin || '----', accentClass: 'primary' };
+
+    const handleShare = () => {
+      if (!referralCode) return; // not loaded yet — button is disabled in this state
+      const message = buildExchangeShareMessage({ vehicleLabel, trackingUrl, referralCode });
+      const url = `https://wa.me/?text=${encodeURIComponent(message)}`;
+      window.open(url, '_blank', 'noopener,noreferrer');
+    };
+
+    // Reused shape from the existing inline timeline below — kept in sync
+    // manually because the existing IIFE only fires for non-Exchange / pre-
+    // accept renders (this branch returns first).
+    const s = trip.status as BookingStatus;
+    const has = (xs: BookingStatus[]) => xs.includes(s);
+    const exchangeSteps: Array<{ key: string; label: string; sub: string; icon: string; done: boolean }> = [
+      { key: 'placed', label: 'Order Placed', sub: 'Exchange booking confirmed', icon: 'check_circle', done: true },
+      { key: 'assigned', label: 'Driver Assigned', sub: driverName ? `${driverName} assigned` : 'Driver on the way', icon: 'person_pin', done: true },
+      { key: 'product_a', label: 'Product A Picked Up', sub: 'Driver collected your item', icon: 'inventory_2',
+        done: has([BookingStatus.IN_TRANSIT, BookingStatus.ARRIVED_AT_RECEIVER, BookingStatus.PICKING_UP_PRODUCT_B, BookingStatus.QC_APPROVED, BookingStatus.QC_REJECTED, BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A, BookingStatus.ARRIVED_AT_ORIGIN_RETURN]) },
+      { key: 'at_receiver', label: 'At Receiver Location', sub: 'Driver at receiver for exchange', icon: 'location_on',
+        done: has([BookingStatus.ARRIVED_AT_RECEIVER, BookingStatus.PICKING_UP_PRODUCT_B, BookingStatus.QC_APPROVED, BookingStatus.QC_REJECTED, BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A, BookingStatus.ARRIVED_AT_ORIGIN_RETURN]) },
+      { key: 'product_b', label: 'Product B Collected', sub: 'Return item collected', icon: 'package_2',
+        done: has([BookingStatus.QC_APPROVED, BookingStatus.RETURNING_PRODUCT_B, BookingStatus.ARRIVED_AT_ORIGIN_RETURN]) },
+      ...(trip.exchange?.qcRequired ? [{ key: 'qc', label: 'Quality Check',
+        sub: trip.exchange?.qcDecision === 'approved' ? 'Approved' : trip.exchange?.qcDecision === 'rejected' ? 'Rejected' : 'Awaiting your review',
+        icon: 'verified',
+        done: has([BookingStatus.QC_APPROVED, BookingStatus.QC_REJECTED, BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A, BookingStatus.ARRIVED_AT_ORIGIN_RETURN]) }] : []),
+      { key: 'returning', label: 'Returning to You', sub: trip.exchange?.failureReason ? 'Returning Product A' : 'Returning Product B', icon: 'undo',
+        done: has([BookingStatus.RETURNING_PRODUCT_B, BookingStatus.RETURNING_PRODUCT_A, BookingStatus.ARRIVED_AT_ORIGIN_RETURN]) },
+    ];
+    const activeStepIdx = exchangeSteps.findIndex(st => !st.done);
+
+    return (
+      <div className="relative min-h-screen w-full flex flex-col bg-white dark:bg-slate-950 text-slate-900 dark:text-white">
+        {/* Status Notification Banner */}
+        {notification && (
+          <div className="fixed top-14 left-1/2 -translate-x-1/2 z-[200] w-full max-w-md px-4 animate-in slide-in-from-top duration-500">
+            <div className="bg-slate-900 text-white p-4 rounded-2xl shadow-2xl border border-white/10 flex items-center gap-4">
+              <div className="size-10 rounded-xl bg-primary flex items-center justify-center shrink-0">
+                <span className="material-symbols-outlined">notifications_active</span>
+              </div>
+              <div className="flex flex-col flex-1">
+                <span className="text-xs font-black uppercase tracking-widest text-primary">{notification.title}</span>
+                <p className="text-sm font-medium opacity-90">{notification.message}</p>
+              </div>
+              <button onClick={() => setNotification(null)} className="text-white/50 shrink-0">
+                <span className="material-symbols-outlined text-lg">close</span>
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Header: back / CRN / Info / Share */}
+        <header className="px-4 pt-12 pb-3 flex items-center gap-2">
+          <button
+            onClick={() => navigate('/home')}
+            aria-label="Back"
+            className="size-10 -ml-2 flex items-center justify-center text-slate-700 dark:text-slate-300"
+          >
+            <span className="material-symbols-outlined">arrow_back</span>
+          </button>
+          <h1 className="flex-1 text-base font-bold tracking-wide truncate">{formatTripCrn(trip.id || tripId)}</h1>
+          <button
+            onClick={() => setShowDetails(true)}
+            aria-label="Trip info"
+            className="flex flex-col items-center text-primary px-2 py-1"
+          >
+            <span className="material-symbols-outlined text-2xl">info</span>
+            <span className="text-[10px] font-bold leading-none mt-0.5">Info</span>
+          </button>
+          <button
+            onClick={handleShare}
+            disabled={!referralCode}
+            aria-label="Share trip"
+            className="flex flex-col items-center text-primary px-2 py-1 disabled:opacity-40"
+          >
+            <span className="material-symbols-outlined text-2xl">share</span>
+            <span className="text-[10px] font-bold leading-none mt-0.5">Share</span>
+          </button>
+        </header>
+
+        {/* Map */}
+        <div className="px-4">
+          <div className="relative w-full rounded-2xl overflow-hidden border border-slate-200 dark:border-slate-800" style={{ height: '52vh' }}>
+            <Map
+              mapId="jangoes-tracking-map"
+              defaultCenter={{ lat: trip.pickup?.lat ?? 28.6139, lng: trip.pickup?.lng ?? 77.2090 }}
+              defaultZoom={12}
+              disableDefaultUI
+              gestureHandling="greedy"
+              style={{ width: '100%', height: '100%' }}
+            >
+              {trip.pickup && (
+                <AdvancedMarker position={{ lat: trip.pickup.lat, lng: trip.pickup.lng }}>
+                  <div className="flex flex-col items-center">
+                    <div className="bg-primary text-white text-[9px] font-black px-2 py-1 rounded-lg mb-1 shadow-lg">PICKUP</div>
+                    <span className="material-symbols-outlined text-primary text-3xl filled drop-shadow-lg">location_on</span>
+                  </div>
+                </AdvancedMarker>
+              )}
+              {trip.dropoff && (
+                <AdvancedMarker position={{ lat: trip.dropoff.lat, lng: trip.dropoff.lng }}>
+                  <div className="flex flex-col items-center">
+                    <div className="bg-red-500 text-white text-[9px] font-black px-2 py-1 rounded-lg mb-1 shadow-lg">DROP</div>
+                    <span className="material-symbols-outlined text-red-500 text-3xl filled drop-shadow-lg">location_on</span>
+                  </div>
+                </AdvancedMarker>
+              )}
+              {driverLocation && (
+                <AdvancedMarker position={driverLocation}>
+                  <div className="flex flex-col items-center">
+                    {driverDistanceKm !== null && (
+                      <div className="bg-white text-slate-900 text-[11px] font-black px-2.5 py-1 rounded-lg mb-1 shadow-lg border border-slate-200">
+                        {driverDistanceKm.toFixed(1)} km away
+                      </div>
+                    )}
+                    <div className="size-9 bg-green-500 rounded-full flex items-center justify-center shadow-lg border-2 border-white">
+                      <span className="material-symbols-outlined text-white text-lg filled">local_shipping</span>
+                    </div>
+                  </div>
+                </AdvancedMarker>
+              )}
+            </Map>
+          </div>
+        </div>
+
+        {/* Status text */}
+        <p className="text-center text-lg font-bold mt-5 px-4">{statusText}</p>
+
+        {/* Driver card */}
+        <div className="mx-4 mt-4 bg-slate-50 dark:bg-slate-900 rounded-2xl p-4 flex items-center gap-3">
+          {driverPhoto ? (
+            <div
+              className="size-12 rounded-full bg-cover bg-center shrink-0 border-2 border-white shadow"
+              style={{ backgroundImage: `url('${driverPhoto}')` }}
+            />
+          ) : (
+            <div className="size-12 rounded-full bg-blue-100 dark:bg-blue-900/30 flex items-center justify-center shrink-0">
+              <span className="material-symbols-outlined text-primary text-2xl">two_wheeler</span>
+            </div>
+          )}
+          <div className="flex-1 min-w-0">
+            <p className="text-base font-black tracking-wide truncate">{driverRcNumber || 'RC —'}</p>
+            <p className="text-xs text-slate-500 truncate">{vehicleLabel} • {driverName || 'Driver'}</p>
+          </div>
+          <a
+            href={driverPhone ? `tel:+91${driverPhone}` : '#'}
+            aria-label="Call driver"
+            className="size-11 rounded-full border-2 border-primary/30 flex items-center justify-center text-primary shrink-0"
+          >
+            <span className="material-symbols-outlined">call</span>
+          </a>
+        </div>
+
+        {/* Address card */}
+        <div className="mx-4 mt-4 bg-white dark:bg-slate-900 border border-slate-200 dark:border-slate-800 rounded-2xl p-4">
+          <div className="flex gap-3 pb-3">
+            <div className="flex flex-col items-center pt-1.5 shrink-0">
+              <span className="size-2.5 rounded-full bg-green-500"></span>
+              <span className="w-px flex-1 bg-slate-200 dark:bg-slate-700 my-1 min-h-[28px]"></span>
+              <span className="size-2.5 rounded-full bg-red-500"></span>
+            </div>
+            <div className="flex-1 min-w-0 flex flex-col gap-3">
+              <div>
+                <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  {trip.senderName || 'Sender'}{trip.senderPhone ? ` • ${trip.senderPhone}` : ''}
+                </p>
+                <p className="text-xs text-slate-500 truncate">{trip.pickup?.address || '—'}</p>
+              </div>
+              <div>
+                <p className="text-xs font-semibold text-slate-700 dark:text-slate-300">
+                  {trip.receiverName || 'Receiver'}{trip.receiverPhone ? ` • ${trip.receiverPhone}` : ''}
+                </p>
+                <p className="text-xs text-slate-500 truncate">{trip.dropoff?.address || '—'}</p>
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={() => setShowDetails(true)}
+            className="w-full pt-3 border-t border-slate-100 dark:border-slate-800 flex items-center justify-center gap-2 text-primary text-sm font-bold"
+          >
+            <span className="material-symbols-outlined text-base">view_list</span>
+            View Details
+          </button>
+        </div>
+
+        <div className="h-6"></div>
+
+        {/* View Details bottom sheet */}
+        {showDetails && (
+          <div
+            className="fixed inset-0 z-[100] flex items-end justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300"
+            onClick={() => setShowDetails(false)}
+          >
+            <div
+              className="w-full max-w-md bg-white dark:bg-slate-900 rounded-t-[40px] shadow-2xl p-6 animate-in slide-in-from-bottom duration-500 max-h-[85vh] overflow-y-auto"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full mx-auto mb-4"></div>
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-xl font-black">Trip Details</h3>
+                <button
+                  onClick={() => setShowDetails(false)}
+                  aria-label="Close"
+                  className="text-slate-400"
+                >
+                  <span className="material-symbols-outlined">close</span>
+                </button>
+              </div>
+
+              {/* OTP block */}
+              <div className={`rounded-xl p-4 flex items-center justify-between mb-5 ${otp.accentClass === 'amber' ? 'bg-amber-50 dark:bg-amber-900/10' : 'bg-blue-50 dark:bg-primary/10'}`}>
+                <div className="flex flex-col">
+                  <span className={`text-[10px] uppercase font-bold tracking-widest mb-1 ${otp.accentClass === 'amber' ? 'text-amber-600' : 'text-primary'}`}>{otp.label}</span>
+                  <span className="text-2xl font-bold tracking-[0.2em] font-mono">{otp.value}</span>
+                </div>
+                <span className={`material-symbols-outlined text-3xl ${otp.accentClass === 'amber' ? 'text-amber-500' : 'text-primary'}`}>shield</span>
+              </div>
+
+              {/* Progress timeline */}
+              <div className="flex flex-col gap-4 relative pl-2">
+                <div className="absolute left-[13px] top-3 bottom-3 w-[2px] bg-slate-100 dark:bg-slate-800"></div>
+                {exchangeSteps.map((st, i) => (
+                  <div key={st.key} className={`flex items-start gap-4 relative ${!st.done && i !== activeStepIdx ? 'opacity-40' : ''}`}>
+                    <div className={`z-10 size-7 rounded-full flex items-center justify-center ring-4 ring-white dark:ring-slate-900 shrink-0 ${
+                      st.done ? 'bg-green-500 text-white' :
+                      i === activeStepIdx ? 'bg-primary text-white animate-pulse' :
+                      'bg-slate-200 dark:bg-slate-800 text-slate-400'
+                    }`}>
+                      <span className="material-symbols-outlined text-sm">{st.done ? 'check' : st.icon}</span>
+                    </div>
+                    <div className="flex flex-col">
+                      <span className={`text-sm font-bold ${st.done || i === activeStepIdx ? 'dark:text-white' : 'text-slate-400'}`}>{st.label}</span>
+                      <span className="text-xs text-slate-400">{st.sub}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              {/* Cancel ride */}
+              <button
+                onClick={() => { setShowDetails(false); setShowCancelModal(true); }}
+                className="w-full mt-6 py-4 text-red-500 font-bold text-sm uppercase tracking-widest flex items-center justify-center gap-2 hover:bg-red-50 dark:hover:bg-red-950/20 rounded-2xl transition-colors"
+              >
+                <span className="material-symbols-outlined">cancel</span>
+                Cancel Ride
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Cancellation modal (same shape as the default layout's) */}
+        {showCancelModal && (
+          <div className="fixed inset-0 z-[110] flex items-end justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+            <div
+              className="w-full max-w-md bg-white dark:bg-slate-900 rounded-t-[40px] shadow-2xl p-8 animate-in slide-in-from-bottom duration-500"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full mx-auto mb-8"></div>
+              <h3 className="text-2xl font-black mb-2 dark:text-white">Cancel Ride?</h3>
+              <p className="text-sm text-slate-500 mb-8">Please let us know why you want to cancel. This helps us improve our service.</p>
+
+              <div className="flex flex-col gap-3 mb-10">
+                {cancelReasons.map((reason) => (
+                  <button
+                    key={reason}
+                    onClick={() => setCancelReason(reason)}
+                    className={`w-full p-4 rounded-2xl text-left text-sm font-bold transition-all border-2 ${
+                      cancelReason === reason
+                        ? 'border-primary bg-primary/5 text-primary'
+                        : 'border-slate-100 dark:border-slate-800 text-slate-600 dark:text-slate-400'
+                    }`}
+                  >
+                    {reason}
+                  </button>
+                ))}
+              </div>
+
+              <div className="flex gap-4">
+                <button
+                  onClick={() => setShowCancelModal(false)}
+                  className="flex-1 h-16 bg-slate-100 dark:bg-slate-800 text-slate-500 font-black rounded-2xl text-xs uppercase tracking-widest"
+                >
+                  Go Back
+                </button>
+                <button
+                  onClick={handleCancelOrder}
+                  disabled={!cancelReason || isCancelling}
+                  className="flex-[2] h-16 bg-red-500 disabled:opacity-30 text-white font-black rounded-2xl text-xs uppercase tracking-widest shadow-xl shadow-red-500/20"
+                >
+                  {isCancelling ? 'Cancelling...' : 'Confirm Cancel'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }

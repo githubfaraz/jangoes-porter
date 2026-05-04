@@ -36,6 +36,60 @@ Notes on the fields:
 
 ---
 
+## 2026-05-04 — Customer Tracking: Exchange post-accept layout + WhatsApp share
+
+**Done**
+- New customer-side tracking layout for **Exchange** trips, shown from `ACCEPTED` through to (but not including) the QC review and terminal exchange screens. Modeled on `EXTRAS/customer-view-after-driver-accepts-trip.jpeg`.
+  - Header: back arrow, **Trip CRN** (first 10 chars of tripId, prefixed `CRN`), **Info** + **Share** icon buttons top-right.
+  - Map (rounded card, 52vh) with pickup, drop, and live driver markers; driver marker carries an "X.X km away" chip computed via `haversineKm` between `driverLocation` and the next leg's target (pickup if pre-pickup, dropoff otherwise).
+  - **Status text** (binary, per user direction): "Driver on the way to pick" while `ACCEPTED`/`ARRIVED_AT_PICKUP`/`PICKING_UP`; "Driver on the way to drop" everywhere else in the active range.
+  - Compact driver card: vehicle illustration avatar (or photo when available), **RC number** (large), category label (`bike` → "2 Wheeler", `car` → "4 Wheeler", `tata-ace` → "Mini Truck", `bolero` → "Pickup Truck", `tata-407` → "Medium Truck", `large-truck` → "Large Truck") + driver name, call icon (tel link).
+  - Address card with a green→red rail; sender name/phone + pickup address, receiver name/phone + dropoff address; **View Details** link at the bottom opens a bottom sheet.
+  - View Details bottom sheet contains: contextual **OTP** (Pickup OTP normally, Return OTP during return stages), full **progress timeline** (same step shape as the existing inline timeline), and **Cancel Ride** button.
+- **Share button** opens WhatsApp via `https://wa.me/?text=<encoded>`. Message body is exactly the copy you specified, with three substitutions: `<vehicleLabel>` (from category map), `jangoes.com/rd/<tripId>` (per-trip tracking URL — receiver-side tracking page is out of scope here; URL stub in place for it to be wired up later), and `<referralCode>`.
+- **Referral code wiring:** new helper `ensureReferralCode(uid)` reads `users/{customerId}.referralCode`; if absent, generates an 8-char uppercase alphanumeric (ambiguous chars 0/O/1/I/L excluded) and persists it via `setDoc(..., { merge: true })`. Loaded once per trip on a `useEffect`. Share button is disabled until the code is loaded.
+
+**Caveats / not done in this change**
+- The receiver-side tracking page at `jangoes.com/rd/<tripId>` doesn't exist yet — neither the web fallback nor the deep-link handoff to the installed app. The share URL is correctly per-trip but currently dead. Treat as a separate workstream.
+- Existing default tracking layout (non-Exchange) untouched. The new branch is an early return gated on `serviceType === 'exchange'` AND status ∈ `EXCHANGE_ACTIVE_STATUSES`.
+- Notification banner and cancellation modal are inlined in both branches (small JSX duplication). Acceptable; can be lifted into a wrapper later if churn warrants it.
+- Status text simplifies multi-leg Exchange (going-to-receiver, returning) into a single "drop" state, per user direction.
+
+**Files touched**
+- `screens/customer/Tracking.tsx` — new helpers (`vehicleCategoryLabel`, `formatTripCrn`, `ensureReferralCode`, `buildExchangeShareMessage`); new state (`showDetails`, `referralCode`); referral-code load effect; new Exchange post-accept early-return branch with header, map, driver card, address card, View Details bottom sheet, Share-to-WhatsApp wiring.
+- `docs/PROGRESS.md` — this entry.
+
+---
+
+## 2026-05-04 — `/api/driver-availability` diagnosis + fix
+
+**Done**
+- Diagnosed the "all categories returned 0" report. Root cause: a transient `14 UNAVAILABLE: Name resolution failed for target dns:firestore.googleapis.com:443` from Firebase Admin. The `try/catch` at `server.ts:311` swallowed the error and returned `{ counts: {} }`, which the frontend rendered as "No drivers nearby" on every vehicle — indistinguishable from a genuine zero-supply state.
+- **`server.ts` (driver-availability endpoint):** on failure, now returns `503 { error: 'availability_unavailable', message }` instead of an empty-counts 200, so the client can tell a backend/network outage apart from "no drivers exist".
+- **`server.ts` (same endpoint):** switched query from `where('role', '==', 'DRIVER')` to `where('roles', 'array-contains', 'DRIVER')`. The single-string `role` field is the *active view* (set by the login toggle and `App.tsx` `handleSwitchRole`); a driver who later switches view to Customer would have `role: 'CUSTOMER'` and silently disappear from availability counts despite being a fully-KYCed driver. The `roles` array is the durable enrollment signal.
+- **`screens/customer/VehicleSelection.tsx`:** added `availabilityFailed` state, branched on `availResponse.ok`. On failure: subtitle changes to "Couldn't check driver availability", and the "No drivers nearby" amber badge is suppressed (since we don't actually know). The default vehicle still gets selected so booking isn't blocked. Vehicle gating was already disabled in the 2026-04-27 fix, so customers can still proceed regardless.
+
+**Caveat / follow-up**
+- The new compound query `(roles array-contains, kycCompleted ==)` likely needs a **Firestore composite index**. First request after server restart may fail with a console link — click it to auto-create the index, takes ~1 min.
+- Dev server (`tsx server.ts`, no `--watch`) does **not** auto-reload server.ts changes. Restart `npm run dev` to pick up the endpoint changes. Vite HMR handles the `VehicleSelection.tsx` change automatically.
+
+**Open questions**
+- _(none — both carried-forward questions resolved this session, see Resolved)_
+
+**Resolved**
+- DLT template for post-QC handover OTP SMS — **decision: keep reusing the generic delivery-OTP template body**. Not registering a new DLT template for now.
+- `/api/driver-availability` returning 0 — root cause was DNS failure to Firestore being silently swallowed. Fixed (see Done).
+
+**Notes / drift**
+- Three commits landed after the last PROGRESS entry but were not themselves logged: `36154d7` (add `docs/PRODUCT_SPECIFICATION.md`), `33fea34` (genericise client name in PRODUCT_SPECIFICATION), `76a68f8` (add reusable Claude Code prompt for replicating SearchLocation flow). All docs-only — no code drift.
+
+**Files touched**
+- `server.ts` — driver-availability query + error response shape
+- `screens/customer/VehicleSelection.tsx` — `availabilityFailed` state, conditional subtitle and badge
+- `docs/PROGRESS.md` — this entry
+
+---
+
 ## 2026-04-27 — Upload-feedback polish + Driver Registration Exit button
 
 **Done**
