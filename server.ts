@@ -5,6 +5,7 @@ import FormData from "form-data";
 import crypto from "crypto";
 import dotenv from "dotenv";
 import admin from "firebase-admin";
+import nodemailer from "nodemailer";
 
 dotenv.config();
 
@@ -294,6 +295,178 @@ app.post('/api/deduct-fare', async (req, res) => {
 });
 
 // ─── Driver Availability Endpoint ────────────────────────────────────────────
+// ─── Mail Invoice Endpoint ───────────────────────────────────────────────────
+// Renders an HTML invoice for a given trip and emails it to the recipient via
+// SMTP. Requires the following env vars (provision before going live):
+//   SMTP_HOST       e.g. smtp.gmail.com
+//   SMTP_PORT       e.g. 465 (SSL) or 587 (STARTTLS)
+//   SMTP_USER       e.g. invoices@yourdomain.com  (or your Gmail address)
+//   SMTP_PASS       Gmail "App Password" or provider API key
+//   SMTP_FROM       e.g. "Jangoes Porter <invoices@yourdomain.com>"  (defaults to SMTP_USER)
+// When any of HOST/USER/PASS is missing the endpoint returns 503 with a
+// human-readable error so the client can show a useful toast.
+app.post('/api/email-invoice', async (req, res) => {
+  const { tripId, recipientEmail } = req.body;
+  if (!tripId || !recipientEmail) {
+    return res.status(400).json({ error: 'Missing tripId or recipientEmail' });
+  }
+
+  const host = process.env.SMTP_HOST;
+  const port = Number(process.env.SMTP_PORT || 587);
+  const user = process.env.SMTP_USER;
+  const pass = process.env.SMTP_PASS;
+  const from = process.env.SMTP_FROM || user;
+  if (!host || !user || !pass) {
+    return res.status(503).json({
+      error: 'email_not_configured',
+      message: 'Server email is not configured yet. Set SMTP_HOST, SMTP_USER, SMTP_PASS in .env.',
+    });
+  }
+
+  try {
+    const snap = await admin.firestore().collection('trips').doc(tripId).get();
+    if (!snap.exists) return res.status(404).json({ error: 'Trip not found' });
+    const trip: any = snap.data();
+
+    const crn = `CRN${tripId.slice(0, 10).toUpperCase()}`;
+    const total = Number(trip.fare ?? 0);
+    const f = trip.finalFare;
+    const tripFare = Number(f?.tripFare ?? trip.estimatedTotal ?? total);
+    const taxable = Number(f?.taxable ?? tripFare);
+    const gst = Number(f?.gst ?? 0);
+    const couponDiscount = Number(trip.couponDiscount ?? 0);
+    const couponLine = couponDiscount > 0
+      ? `<tr><td>Coupon discount${trip.couponCode ? ` (${trip.couponCode})` : ''}</td><td style="text-align:right;color:#16a34a">−₹${couponDiscount.toFixed(2)}</td></tr>`
+      : '';
+    const rounding = +(total - taxable - gst + couponDiscount).toFixed(2);
+    const roundingLine = rounding !== 0
+      ? `<tr><td>Rounding</td><td style="text-align:right">₹${rounding.toFixed(2)}</td></tr>`
+      : '';
+    const paymentLabel = trip.paymentMethod === 'cash' ? 'Cash'
+      : trip.paymentMethod === 'online' ? 'Online'
+      : 'Wallet';
+
+    const html = `
+      <div style="font-family:-apple-system,Segoe UI,Roboto,sans-serif;max-width:560px;margin:0 auto;padding:24px;color:#0f172a">
+        <h1 style="margin:0 0 4px;font-size:22px">Jangoes Porter — Invoice</h1>
+        <p style="margin:0 0 24px;color:#64748b;font-size:13px">${crn} · ${new Date(trip.createdAt?.toDate?.() || trip.createdAt || Date.now()).toLocaleString('en-IN')}</p>
+        <table style="width:100%;border-collapse:collapse;margin-bottom:20px">
+          <tr><td style="padding:6px 0;color:#64748b">Pickup</td><td style="padding:6px 0;text-align:right">${trip.pickup?.address || '—'}</td></tr>
+          <tr><td style="padding:6px 0;color:#64748b">Drop</td><td style="padding:6px 0;text-align:right">${trip.dropoff?.address || '—'}</td></tr>
+          <tr><td style="padding:6px 0;color:#64748b">Vehicle</td><td style="padding:6px 0;text-align:right">${trip.vehicleType || '—'}</td></tr>
+        </table>
+        <h3 style="margin:0 0 8px;font-size:15px">Fare details</h3>
+        <table style="width:100%;border-collapse:collapse;font-size:14px">
+          <tr><td style="padding:4px 0">Trip Fare</td><td style="padding:4px 0;text-align:right">₹${tripFare.toFixed(2)}</td></tr>
+          ${couponLine}
+          <tr><td style="padding:4px 0;border-top:1px solid #e2e8f0">Fare Without Tax</td><td style="padding:4px 0;text-align:right;border-top:1px solid #e2e8f0">₹${taxable.toFixed(2)}</td></tr>
+          <tr><td style="padding:4px 0">IGST Tax (5%)</td><td style="padding:4px 0;text-align:right">₹${gst.toFixed(2)}</td></tr>
+          ${roundingLine}
+          <tr><td style="padding:8px 0;font-weight:700;border-top:1px solid #e2e8f0">Total Order Fare</td><td style="padding:8px 0;text-align:right;font-weight:700;border-top:1px solid #e2e8f0">₹${total.toFixed(2)}</td></tr>
+        </table>
+        <h3 style="margin:20px 0 8px;font-size:15px">Payment</h3>
+        <table style="width:100%;border-collapse:collapse;font-size:14px">
+          <tr><td style="padding:4px 0">${paymentLabel}</td><td style="padding:4px 0;text-align:right">₹${total.toFixed(2)}</td></tr>
+        </table>
+        <p style="margin-top:24px;color:#94a3b8;font-size:11px">Thanks for booking with Jangoes Porter.</p>
+      </div>`;
+
+    const transporter = nodemailer.createTransport({
+      host,
+      port,
+      secure: port === 465,
+      auth: { user, pass },
+    });
+    await transporter.sendMail({
+      from,
+      to: recipientEmail,
+      subject: `Jangoes Porter — Invoice ${crn}`,
+      html,
+    });
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('[EmailInvoice]', err.message);
+    res.status(500).json({ error: 'send_failed', message: err.message });
+  }
+});
+
+// ─── Coupon Validation Endpoint ──────────────────────────────────────────────
+// Reads coupons/{CODE} (uppercase) from Firestore. Validates window, usage
+// limit, min-order. Does NOT increment usedCount — that happens on trip
+// creation (see /api/redeem-coupon below) so a customer who validates but
+// doesn't book doesn't burn a slot.
+//
+// Coupon doc shape (created manually in Firebase console for now):
+//   { code: 'SAVE100', discountType: 'flat' | 'percent', discountValue: 100,
+//     validFrom?: ISO string, validUntil?: ISO string,
+//     usageLimit?: number, usedCount?: number,
+//     minOrderAmount?: number }
+app.post('/api/validate-coupon', async (req, res) => {
+  const { code, orderAmount } = req.body;
+  if (!code) return res.status(400).json({ valid: false, reason: 'Missing code' });
+
+  try {
+    const id = String(code).toUpperCase().trim();
+    const snap = await admin.firestore().collection('coupons').doc(id).get();
+    if (!snap.exists) return res.json({ valid: false, reason: 'Invalid coupon code' });
+
+    const c: any = snap.data();
+    // Backwards-compat: coupons created before the active-flag rollout are
+    // missing the field — treat absent === active. Only an explicit `false`
+    // disables the coupon.
+    if (c.active === false) {
+      return res.json({ valid: false, reason: 'Coupon is currently inactive' });
+    }
+    const now = Date.now();
+    if (c.validFrom && now < new Date(c.validFrom).getTime()) {
+      return res.json({ valid: false, reason: 'Coupon not yet active' });
+    }
+    if (c.validUntil && now > new Date(c.validUntil).getTime()) {
+      return res.json({ valid: false, reason: 'Coupon expired' });
+    }
+    if (c.usageLimit != null && (c.usedCount ?? 0) >= c.usageLimit) {
+      return res.json({ valid: false, reason: 'Coupon usage limit reached' });
+    }
+    const amount = Number(orderAmount ?? 0);
+    if (c.minOrderAmount != null && amount < c.minOrderAmount) {
+      return res.json({ valid: false, reason: `Minimum order ₹${c.minOrderAmount} required` });
+    }
+
+    let discount = 0;
+    if (c.discountType === 'flat') {
+      discount = Number(c.discountValue) || 0;
+    } else if (c.discountType === 'percent') {
+      discount = Math.round((amount * (Number(c.discountValue) || 0)) / 100 * 100) / 100;
+    } else {
+      return res.json({ valid: false, reason: 'Coupon misconfigured' });
+    }
+    // Cap discount at the order amount so total never goes negative.
+    discount = Math.min(discount, amount);
+
+    res.json({ valid: true, code: id, discount, discountType: c.discountType });
+  } catch (err: any) {
+    console.error('[ValidateCoupon]', err.message);
+    res.status(500).json({ valid: false, reason: 'Validation error' });
+  }
+});
+
+// Increments coupons/{CODE}.usedCount atomically. Called by the client right
+// after a trip is created with that code. Idempotency: not built-in — repeated
+// calls will increment more than once. Acceptable for the MVP usage model.
+app.post('/api/redeem-coupon', async (req, res) => {
+  const { code } = req.body;
+  if (!code) return res.status(400).json({ error: 'Missing code' });
+  try {
+    const id = String(code).toUpperCase().trim();
+    const ref = admin.firestore().collection('coupons').doc(id);
+    await ref.update({ usedCount: admin.firestore.FieldValue.increment(1) });
+    res.json({ success: true });
+  } catch (err: any) {
+    console.error('[RedeemCoupon]', err.message);
+    res.status(500).json({ error: 'increment_failed' });
+  }
+});
+
 app.get('/api/driver-availability', async (_req, res) => {
   try {
     // `roles` is the durable list of roles the user has registered for; `role`
