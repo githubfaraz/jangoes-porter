@@ -11,7 +11,8 @@
     "start": "node server.ts",
     "cap:sync": "vite build && cap sync",
     "cap:android": "vite build && cap sync && cap open android",
-    "cap:ios": "vite build && cap sync && cap open ios"
+    "cap:ios": "vite build && cap sync && cap open ios",
+    "deploy:rules": "npx firebase-tools deploy --only firestore:rules --project jangoes-porter"
   },
   "dependencies": {
     "@capacitor/android": "^8.2.0",

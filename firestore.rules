@@ -1,0 +1,99 @@
+rules_version = '2';
+
+// Source of truth for Firestore security rules. Deploy via:
+//   firebase deploy --only firestore:rules
+//
+// The server (`server.ts`) uses the Admin SDK and bypasses these rules — any
+// endpoint there can read/write anything regardless of what's below.
+//
+// Receiver-side tracking (`/rd/:tripId`) does NOT hit Firestore directly; it
+// goes through the `/api/public-trip/:tripId` endpoint, which strips PII
+// before responding. That's why no public-read rule is needed on `trips`.
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isUser(uid) {
+      return isSignedIn() && request.auth.uid == uid;
+    }
+
+    // `roles` is the durable list; `role` is the active view that flips when
+    // a user toggles between Customer / Driver. Check the array so an admin
+    // who's currently viewing as Customer still has admin DB access.
+    function isAdmin() {
+      let u = get(/databases/$(database)/documents/users/$(request.auth.uid)).data;
+      return u.roles.hasAny(['ADMIN']) || u.role == 'ADMIN';
+    }
+
+    // ─── users ───────────────────────────────────────────────────────────
+    match /users/{uid} {
+      allow read:  if isUser(uid) || isAdmin();
+      allow write: if isUser(uid) || isAdmin();
+
+      // Per-user transactions (wallet ledger)
+      match /transactions/{txId} {
+        allow read:  if isUser(uid) || isAdmin();
+        allow write: if isAdmin(); // server writes via Admin SDK
+      }
+    }
+
+    // ─── trips ───────────────────────────────────────────────────────────
+    // Customers can read/write their own trips. Drivers can read trips they
+    // accepted plus any SEARCHING trip (Dashboard listener). Admin sees all.
+    match /trips/{tripId} {
+      allow read: if isSignedIn() && (
+        resource.data.customerId == request.auth.uid ||
+        resource.data.driverId   == request.auth.uid ||
+        resource.data.status     == 'SEARCHING' ||
+        isAdmin()
+      );
+      allow create: if isSignedIn() && request.resource.data.customerId == request.auth.uid;
+      allow update: if isSignedIn() && (
+        resource.data.customerId == request.auth.uid ||
+        resource.data.driverId   == request.auth.uid ||
+        // SEARCHING trip — any driver can claim it
+        (resource.data.status == 'SEARCHING' && request.resource.data.driverId == request.auth.uid) ||
+        isAdmin()
+      );
+      allow delete: if isAdmin();
+    }
+
+    // ─── coupons ─────────────────────────────────────────────────────────
+    // Admin SPA reads/writes via client SDK. Customers never touch coupons
+    // directly — the server validates and redeems with the Admin SDK.
+    match /coupons/{code} {
+      allow read, write: if isAdmin();
+
+      // Per-trip redemption records (for idempotent /api/redeem-coupon).
+      // Server-only — Admin SDK bypasses these.
+      match /redemptions/{tripId} {
+        allow read, write: if isAdmin();
+      }
+    }
+
+    // ─── config ──────────────────────────────────────────────────────────
+    // Vehicle rates, surcharges, etc. Anyone signed in can read; only admins write.
+    match /config/{doc} {
+      allow read:  if isSignedIn();
+      allow write: if isAdmin();
+    }
+
+    // ─── adminLogs audit log ─────────────────────────────────────────────
+    // Written by every admin mutation via logAdminAction() in
+    // admin/services/activityLog.ts. Read-only by Super Admins via
+    // /activity-logs UI; writes happen on the client (admin SPA).
+    match /adminLogs/{logId} {
+      allow read:  if isAdmin();
+      allow write: if isAdmin();
+    }
+
+    // Default deny everything else.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}
