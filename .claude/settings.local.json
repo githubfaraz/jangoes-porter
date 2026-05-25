@@ -10,7 +10,12 @@
       "Bash(git status:*)",
       "Bash(git add:*)",
       "Bash(git commit:*)",
-      "Bash(git push:*)"
+      "Bash(git push:*)",
+      "Bash(xargs grep:*)",
+      "Bash(npm run *)",
+      "Bash(npm install *)",
+      "Bash(npm ls *)",
+      "Bash(grep -n \"{fare}\\\\|>= fare\\\\|? fare\\\\|fare}\\\\|fare \\\\\\\\\\\\*\\\\|fare \" screens/customer/OrderSummary.tsx)"
     ]
   }
 }

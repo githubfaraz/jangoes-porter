@@ -36,6 +36,66 @@ Notes on the fields:
 
 ---
 
+## 2026-05-25 — Activity tab UX, exchange driver actions, admin image audit, listener stability
+
+**Done**
+- **Customer Activity tab — Mail Invoice on every row.** `OrderHistory.tsx` now has a small outline mail-icon button on each ongoing row and a "Mail Invoice" outline button on each past row. Reuses `/api/email-invoice` (works for ongoing trips too since the endpoint doesn't gate on status). Falls back to `prompt()` when the customer has no email (OTP-only signups).
+- **Past list trimmed to 5 + paginated full history.** `OrderHistory.tsx` shows the 5 most-recent past trips with a "View All (N)" button when more exist. New `screens/shared/AllOrders.tsx` paginates the full history at 10/page with Prev/Next; mounted at `/orders/all`.
+- **Exchange 3-leg display + scroll fix.** Past row in OrderHistory branches on `serviceType === 'exchange'` and renders three legs (sender → receiver → sender return) with green/red/green-ringed dots and "Leg 1/2/3" labels. Outer `OrderHistory` wrapper changed from `h-full` to `h-screen` + `shrink-0` on the header so the list scrolls inside instead of growing the body.
+- **Customer Tracking — Pickup OTP card.** Exchange post-accept layout in `Tracking.tsx` now shows an OTP card (Pickup OTP / Return OTP, themed primary/amber) between the status text and the driver info card. Previously the OTP was only visible after tapping "View Details".
+- **Driver Exchange — Cancel + Logout from any screen.** `ExchangeTrip.tsx` got a `more_vert` menu in the top bar (next to Chat) on every in-progress status screen. Opens a bottom sheet with **Back to Dashboard**, **Cancel Trip** (red — opens confirmation modal with 5 reasons, writes `status: CANCELLED, cancelReason, cancelledBy: 'driver'`), and **Log Out**. Terminal screens (EXCHANGE_COMPLETED / EXCHANGE_FAILED) untouched — they already had BACK TO DASHBOARD.
+- **Admin Trips — image audit.** `admin/screens/Trips.tsx` expanded-row now renders all uploaded images in two color-tinted groups (blue = Customer uploads, emerald = Driver uploads), each with the uploader's name + UID. Covers `parcelImageUrl`, `exchange.productA/B.images`, `exchange.productA/B.referencePhotos`, and `exchange.qcChecklist.photos`. Each thumbnail opens a lightbox with uploader attribution + image label.
+- **Activity Logs permission error fixed.** `firestore.rules` updated: renamed `adminActions` rule to `adminLogs` (the actual collection name written by `admin/services/activityLog.ts`). Required `npm run deploy:rules` to push to Firebase.
+- **`deploy:rules` works without global firebase CLI.** Switched the script to `npx firebase-tools deploy --only firestore:rules --project jangoes-porter`.
+- **Driver TripRequestOverlay listener stability.** The new-trip listener used to re-subscribe on every GPS tick and KYC snapshot (deps included `driverLat`/`driverLng`/`pendingDocs`). Refactored to depend only on `isOnline`; other inputs read via refs inside the snapshot callback. Eliminates the brief unsubscribe-resubscribe windows that were preventing the popup from firing reliably on non-`/dashboard` screens.
+
+**In progress**
+- _(none — all changes ready to commit)_
+
+**Next**
+- After commit + push: run `npm run deploy:rules` so the `adminLogs` rule lands in the Console.
+- SMTP credentials for Mail Invoice (Open Q #1) still outstanding.
+
+**Open questions carried forward**
+- **#1 SMTP credentials for Mail Invoice.**
+- **#2 DLT template for receiver pickup OTP.**
+
+**Files touched today**
+- New: `screens/shared/AllOrders.tsx`
+- Modified: `App.tsx`, `package.json`, `firestore.rules`, `admin/screens/Trips.tsx`, `screens/customer/Tracking.tsx`, `screens/driver/ExchangeTrip.tsx`, `screens/driver/TripRequestOverlay.tsx`, `screens/shared/OrderHistory.tsx`
+- Docs: `docs/PROGRESS.md` (this entry)
+
+---
+
+## 2026-05-24 — Audit of untracked work since 2026-05-04
+
+**Status**
+- Repo has 10 modified + 3 untracked files that aren't in any PROGRESS entry. They appear to address 4 of the 6 open questions from 2026-05-04. Logging what's on disk; not committing in this session.
+
+**Done (uncommitted, on disk)**
+- **Open Q #3 — Receiver tracking page.** New `screens/RecipientTracking.tsx` (public, polls every 8s, status banner + driver card + map). New `GET /api/public-trip/:tripId` in `server.ts` returns a PII-stripped projection (no phones, OTPs, fare, customer IDs). New bare-URL alias `GET /rd/:tripId` → `302 /#/rd/:tripId` so WhatsApp links work. `App.tsx` routes `/rd/:tripId` to `RecipientTracking` ahead of the auth branch and hides BottomNav + driver TripRequestOverlay on `/rd/*`.
+- **Open Q #4 — Book Again pre-fills earlier flow.** `OrderHistory.tsx` + `TripDetails.tsx` Book Again now navigates to `/search` (not `/summary`) carrying the full `buildBookAgainState`. `SearchLocation.tsx` reads `pickup`/`drop` from incoming state (wins over `JANGOES_LAST_PICKUP`) and forwards the rest of the payload to the next route. `ParcelDetails.tsx` pre-fills description + analysis from `state.parcel`. `VehicleSelection.tsx` pre-selects `state.vehicle.id` if visible/enabled.
+- **Open Q #5 — Coupon redeem now idempotent.** `POST /api/redeem-coupon` accepts `tripId` and runs a Firestore transaction that creates `coupons/{CODE}/redemptions/{tripId}` and increments `usedCount` only if the doc didn't already exist. `OrderSummary.tsx` now passes `tripId: docRef.id`. Back-compat: no `tripId` → old non-idempotent behavior.
+- **Open Q #6 — Firestore rules checked into repo.** New `firestore.rules` (full ruleset matching what's in Console — `users`, `users/{uid}/transactions`, `trips`, `coupons` + `coupons/{code}/redemptions`, `config`, `adminActions`, default-deny) and `firebase.json` pointing to it. New `npm run deploy:rules` script.
+- **CLAUDE.md** — appended a "You are a senior software engineer" rules block (terse-response preferences).
+
+**In progress**
+- All of the above is uncommitted in working tree. Modified: `App.tsx`, `CLAUDE.md`, `package.json`, `server.ts`, `screens/customer/{OrderSummary,ParcelDetails,SearchLocation,VehicleSelection}.tsx`, `screens/shared/{OrderHistory,TripDetails}.tsx`. Untracked: `firebase.json`, `firestore.rules`, `screens/RecipientTracking.tsx`.
+
+**Next**
+- User to confirm what's on disk is intended, then commit in logical groups (receiver tracking / Book Again prefill / coupon idempotency / firestore rules in repo / CLAUDE.md tweak).
+- Run `npm run deploy:rules` once after committing so repo and Console rules match.
+- End-to-end test of receiver tracking link (book → share via WhatsApp → open on second device).
+
+**Open questions carried forward from 2026-05-04**
+- **#1 SMTP credentials for Mail Invoice** — still unresolved per session-start.
+- **#2 DLT template for receiver pickup OTP** — still using generic delivery-OTP template.
+
+**Files touched today**
+- _(this session only edited `docs/PROGRESS.md`; uncommitted code changes above were already on disk at session start)_
+
+---
+
 ## 2026-05-04 — Session wrap-up
 
 A large session — eight discrete batches landed in `main` plus one Firebase Console change. Entries below have full per-batch detail; this is the index.
