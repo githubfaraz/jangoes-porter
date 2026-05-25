@@ -5,11 +5,17 @@ import { classifyParcel } from '../../services/geminiService.ts';
 const ParcelDetails: React.FC = () => {
   const navigate = useNavigate();
   const location = useLocation();
-  const bookingState = location.state || {};
+  const bookingState: any = location.state || {};
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [description, setDescription] = useState('');
+  // Pre-fill from a Book Again payload so the user can hit Next immediately.
+  const prefillParcel = bookingState.parcel;
+  const [description, setDescription] = useState<string>(prefillParcel?.category || '');
   const [loading, setLoading] = useState(false);
-  const [analysis, setAnalysis] = useState<{ category: string, fragile: boolean, estimatedWeight: number } | null>(null);
+  const [analysis, setAnalysis] = useState<{ category: string, fragile: boolean, estimatedWeight: number } | null>(
+    prefillParcel?.category
+      ? { category: prefillParcel.category, fragile: !!prefillParcel.fragile, estimatedWeight: bookingState.dimensions?.chargeableWeight || 0 }
+      : null
+  );
   const [images, setImages] = useState<string[]>([]);
 
   // Analyze parcel details using Gemini AI, including any uploaded images

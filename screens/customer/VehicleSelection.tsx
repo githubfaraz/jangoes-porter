@@ -40,6 +40,9 @@ const VehicleSelection: React.FC = () => {
   const pickupTitle = pickup?.title || pickup?.address || 'Pickup location';
   const dropTitle   = drop?.title   || drop?.address   || 'Drop location';
 
+  // Pre-select a Book Again vehicle if its id is enabled and visible.
+  const prefillVehicleId: string | undefined = bookingState.vehicle?.id;
+
   // Check which vehicle categories have registered drivers
   useEffect(() => {
     async function checkAvailability() {
@@ -50,21 +53,27 @@ const VehicleSelection: React.FC = () => {
         ]);
         setEnabledVehicles(settings.vehicles || {});
         const visibleVehicles = VEHICLE_TYPES.filter(v => (settings.vehicles || {})[v.id] !== false);
+        const prefillVisible = prefillVehicleId && visibleVehicles.some(v => v.id === prefillVehicleId);
 
         if (!availResponse.ok) {
           // Backend/network failure — don't show "No drivers nearby" badges
           // (they'd misrepresent a transient outage as zero supply).
           setAvailabilityFailed(true);
-          if (visibleVehicles.length > 0) setSelected(visibleVehicles[0].id);
+          if (prefillVisible) setSelected(prefillVehicleId!);
+          else if (visibleVehicles.length > 0) setSelected(visibleVehicles[0].id);
           return;
         }
 
         const availJson = await availResponse.json();
         const counts: Record<string, number> = availJson.counts || {};
         setAvailableCategories(counts);
-        const firstAvailable = visibleVehicles.find(v => counts[v.id] && counts[v.id] > 0);
-        if (firstAvailable) setSelected(firstAvailable.id);
-        else if (visibleVehicles.length > 0) setSelected(visibleVehicles[0].id);
+        if (prefillVisible) {
+          setSelected(prefillVehicleId!);
+        } else {
+          const firstAvailable = visibleVehicles.find(v => counts[v.id] && counts[v.id] > 0);
+          if (firstAvailable) setSelected(firstAvailable.id);
+          else if (visibleVehicles.length > 0) setSelected(visibleVehicles[0].id);
+        }
       } catch (err) {
         console.error('Error checking driver availability:', err);
         setAvailabilityFailed(true);

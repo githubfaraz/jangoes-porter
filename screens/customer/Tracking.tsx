@@ -789,6 +789,24 @@ const Tracking: React.FC = () => {
         {/* Status text */}
         <p className="text-center text-lg font-bold mt-5 px-4">{statusText}</p>
 
+        {/* OTP card — shown above the driver info so the customer doesn't have
+            to open View Details to find the pickup/return code. */}
+        <div className={`mx-4 mt-4 rounded-2xl p-4 flex items-center justify-between ${
+          otp.accentClass === 'amber'
+            ? 'bg-amber-50 dark:bg-amber-900/10'
+            : 'bg-blue-50 dark:bg-primary/10'
+        }`}>
+          <div className="flex flex-col">
+            <span className={`text-[10px] uppercase font-bold tracking-widest mb-1 ${
+              otp.accentClass === 'amber' ? 'text-amber-600' : 'text-primary'
+            }`}>{otp.label}</span>
+            <span className="text-2xl font-bold tracking-[0.2em] font-mono dark:text-white">{otp.value}</span>
+          </div>
+          <span className={`material-symbols-outlined text-3xl ${
+            otp.accentClass === 'amber' ? 'text-amber-500' : 'text-primary'
+          }`}>shield</span>
+        </div>
+
         {/* Driver card */}
         <div className="mx-4 mt-4 bg-slate-50 dark:bg-slate-900 rounded-2xl p-4 flex items-center gap-3">
           {driverPhoto ? (

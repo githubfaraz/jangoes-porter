@@ -264,7 +264,7 @@ const TripDetails: React.FC = () => {
           {sendingInvoice ? 'Sending…' : 'Mail Invoice'}
         </button>
         <button
-          onClick={() => navigate('/summary', { state: buildBookAgainState(trip) })}
+          onClick={() => navigate('/search', { state: buildBookAgainState(trip) })}
           className="flex-1 h-12 bg-primary text-white font-bold rounded-full text-sm shadow-md shadow-primary/20 active:scale-[0.98] transition-transform"
         >
           Book Again

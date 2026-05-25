@@ -72,6 +72,32 @@ const OrderHistory: React.FC = () => {
   const navigate = useNavigate();
   const [trips, setTrips] = useState<(Trip & { id: string })[]>([]);
   const [loading, setLoading] = useState(true);
+  const [mailingTripId, setMailingTripId] = useState<string | null>(null);
+
+  // Mirrors TripDetails.handleMailInvoice — same /api/email-invoice endpoint,
+  // works for ongoing trips too (the server doesn't gate on status).
+  const handleMailInvoice = async (trip: Trip & { id: string }) => {
+    const recipient = auth.currentUser?.email || prompt('Email the invoice to:') || '';
+    if (!recipient) return;
+    setMailingTripId(trip.id);
+    try {
+      const res = await fetch('/api/email-invoice', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ tripId: trip.id, recipientEmail: recipient }),
+      });
+      const data = await res.json();
+      if (!res.ok || !data.success) {
+        alert(data.message || data.error || 'Failed to send invoice. Please try again.');
+        return;
+      }
+      alert(`Invoice sent to ${recipient}.`);
+    } catch (err: any) {
+      alert('Failed to send invoice: ' + (err?.message || 'Unknown error'));
+    } finally {
+      setMailingTripId(null);
+    }
+  };
 
   useEffect(() => {
     const user = auth.currentUser;
@@ -108,11 +134,13 @@ const OrderHistory: React.FC = () => {
   }, []);
 
   const ongoing = trips.filter(t => ONGOING_STATUSES.includes(t.status));
-  const past = trips.filter(t => PAST_STATUSES.includes(t.status));
+  const pastAll = trips.filter(t => PAST_STATUSES.includes(t.status));
+  const past = pastAll.slice(0, 5);
+  const hasMorePast = pastAll.length > 5;
 
   return (
-    <div className="flex flex-col h-full bg-background-light dark:bg-background-dark">
-      <header className="px-5 pt-12 pb-3 bg-white dark:bg-background-dark">
+    <div className="flex flex-col h-screen bg-background-light dark:bg-background-dark">
+      <header className="px-5 pt-12 pb-3 bg-white dark:bg-background-dark shrink-0">
         <h1 className="text-2xl font-black text-slate-900 dark:text-white">Orders</h1>
       </header>
 
@@ -136,23 +164,39 @@ const OrderHistory: React.FC = () => {
                   <span className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Ongoing</span>
                 </div>
                 {ongoing.map(trip => (
-                  <button
+                  <div
                     key={trip.id}
-                    onClick={() => navigate('/tracking', { state: { tripId: trip.id } })}
-                    className="w-full text-left bg-white dark:bg-slate-900 px-5 py-4 border-b border-slate-100 dark:border-slate-800 active:bg-slate-50 dark:active:bg-slate-800/60 transition-colors"
+                    className="bg-white dark:bg-slate-900 border-b border-slate-100 dark:border-slate-800 px-5 py-4 flex items-center gap-3"
                   >
-                    <div className="flex items-center gap-3">
+                    <button
+                      onClick={() => navigate('/tracking', { state: { tripId: trip.id } })}
+                      className="flex items-center gap-3 flex-1 min-w-0 text-left active:opacity-80 transition-opacity"
+                    >
                       <span className="material-symbols-outlined text-primary text-2xl">{vehicleIcon(trip.vehicleType)}</span>
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-bold text-slate-900 dark:text-white">{vehicleLabel(trip.vehicleType)}</p>
                         <p className="text-xs text-slate-400">{formatDate(trip.createdAt)}</p>
                       </div>
-                      <div className="flex items-center gap-1">
-                        <span className="text-sm font-black text-slate-900 dark:text-white">₹{trip.fare?.toFixed(0) || '0'}</span>
-                        <span className="material-symbols-outlined text-slate-400">chevron_right</span>
-                      </div>
-                    </div>
-                  </button>
+                      <span className="text-sm font-black text-slate-900 dark:text-white">₹{trip.fare?.toFixed(0) || '0'}</span>
+                    </button>
+                    <button
+                      onClick={() => handleMailInvoice(trip)}
+                      disabled={mailingTripId === trip.id}
+                      aria-label="Mail invoice"
+                      className="size-9 rounded-full border border-primary text-primary flex items-center justify-center active:scale-95 transition-transform disabled:opacity-50 shrink-0"
+                    >
+                      <span className="material-symbols-outlined text-base">
+                        {mailingTripId === trip.id ? 'hourglass_top' : 'mail'}
+                      </span>
+                    </button>
+                    <button
+                      onClick={() => navigate('/tracking', { state: { tripId: trip.id } })}
+                      aria-label="Open tracking"
+                      className="text-slate-400 shrink-0"
+                    >
+                      <span className="material-symbols-outlined">chevron_right</span>
+                    </button>
+                  </div>
                 ))}
               </>
             )}
@@ -187,7 +231,45 @@ const OrderHistory: React.FC = () => {
                           </div>
                         </button>
 
-                        {/* Address card */}
+                        {/* Address card — Exchange shows 3 legs (sender → receiver → sender return) */}
+                        {trip.serviceType === 'exchange' ? (
+                        <div className="bg-slate-50 dark:bg-slate-800/40 rounded-2xl p-4 mb-3">
+                          <div className="flex gap-3">
+                            <div className="flex flex-col items-center pt-2 shrink-0">
+                              <span className="size-2.5 rounded-full bg-green-500"></span>
+                              <span className="w-px flex-1 bg-slate-300 dark:bg-slate-600 my-1 min-h-[28px] border-l border-dashed border-slate-300 dark:border-slate-600"></span>
+                              <span className="size-2.5 rounded-full bg-red-500"></span>
+                              <span className="w-px flex-1 bg-slate-300 dark:bg-slate-600 my-1 min-h-[28px] border-l border-dashed border-slate-300 dark:border-slate-600"></span>
+                              <span className="size-2.5 rounded-full bg-green-500 ring-2 ring-green-200"></span>
+                            </div>
+                            <div className="flex-1 min-w-0 flex flex-col gap-3">
+                              <div>
+                                <p className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Leg 1 · Pick up Product A</p>
+                                <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                                  {trip.senderName || 'Sender'}{trip.senderPhone ? ` • ${trip.senderPhone}` : ''}
+                                </p>
+                                <p className="text-xs text-slate-500 truncate">{trip.pickup?.address || '—'}</p>
+                              </div>
+                              <div>
+                                <p className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">Leg 2 · Deliver A / Collect B</p>
+                                <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                                  {trip.receiverName || 'Receiver'}{trip.receiverPhone ? ` • ${trip.receiverPhone}` : ''}
+                                </p>
+                                <p className="text-xs text-slate-500 truncate">{trip.dropoff?.address || '—'}</p>
+                              </div>
+                              <div>
+                                <p className="text-[10px] uppercase tracking-wider text-slate-400 font-semibold">
+                                  Leg 3 · {trip.status === BookingStatus.EXCHANGE_FAILED ? "Return Product 'A'" : "Return Product 'B'"} to you
+                                </p>
+                                <p className="text-sm font-bold text-slate-900 dark:text-white truncate">
+                                  {trip.senderName || 'Sender'}{trip.senderPhone ? ` • ${trip.senderPhone}` : ''}
+                                </p>
+                                <p className="text-xs text-slate-500 truncate">{trip.pickup?.address || '—'}</p>
+                              </div>
+                            </div>
+                          </div>
+                        </div>
+                        ) : (
                         <div className="bg-slate-50 dark:bg-slate-800/40 rounded-2xl p-4 mb-3">
                           <div className="flex gap-3">
                             <div className="flex flex-col items-center pt-2 shrink-0">
@@ -211,24 +293,48 @@ const OrderHistory: React.FC = () => {
                             </div>
                           </div>
                         </div>
+                        )}
 
-                        {/* Status + Book Again row */}
-                        <div className="flex items-center justify-between gap-3">
-                          <div className={`flex items-center gap-1.5 ${pill.color}`}>
+                        {/* Status + Mail Invoice + Book Again row */}
+                        <div className="flex items-center justify-between gap-2">
+                          <div className={`flex items-center gap-1.5 ${pill.color} min-w-0`}>
                             <span className="material-symbols-outlined text-base">{pill.icon}</span>
-                            <span className="text-sm font-bold">{pill.label}</span>
+                            <span className="text-sm font-bold truncate">{pill.label}</span>
                           </div>
-                          <button
-                            onClick={() => navigate('/summary', { state: buildBookAgainState(trip) })}
-                            className="px-6 h-10 bg-primary text-white text-sm font-bold rounded-xl active:scale-[0.98] transition-transform"
-                          >
-                            Book Again
-                          </button>
+                          <div className="flex items-center gap-2 shrink-0">
+                            <button
+                              onClick={() => handleMailInvoice(trip)}
+                              disabled={mailingTripId === trip.id}
+                              className="px-3 h-10 border border-primary text-primary text-xs font-bold rounded-xl active:scale-[0.98] transition-transform disabled:opacity-50 flex items-center gap-1.5"
+                            >
+                              <span className="material-symbols-outlined text-base">
+                                {mailingTripId === trip.id ? 'hourglass_top' : 'mail'}
+                              </span>
+                              {mailingTripId === trip.id ? 'Sending…' : 'Mail Invoice'}
+                            </button>
+                            <button
+                              onClick={() => navigate('/search', { state: buildBookAgainState(trip) })}
+                              className="px-4 h-10 bg-primary text-white text-sm font-bold rounded-xl active:scale-[0.98] transition-transform"
+                            >
+                              Book Again
+                            </button>
+                          </div>
                         </div>
                       </div>
                     );
                   })}
                 </div>
+                {hasMorePast && (
+                  <div className="bg-white dark:bg-slate-900 px-5 py-4 border-t-8 border-slate-100 dark:border-slate-800/40">
+                    <button
+                      onClick={() => navigate('/orders/all')}
+                      className="w-full h-12 border-2 border-primary text-primary text-sm font-bold rounded-xl active:scale-[0.98] transition-transform flex items-center justify-center gap-1.5"
+                    >
+                      View All ({pastAll.length})
+                      <span className="material-symbols-outlined text-base">arrow_forward</span>
+                    </button>
+                  </div>
+                )}
               </>
             )}
           </>

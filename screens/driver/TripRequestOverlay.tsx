@@ -53,6 +53,22 @@ const TripRequestOverlay: React.FC = () => {
   const declinedTripsRef = useRef<Set<string>>(new Set());
   const geoWatchRef = useRef<number | null>(null);
 
+  // Refs mirror the latest values so the trip listener stays subscribed across
+  // GPS/KYC updates instead of tearing down on every coord tick. Without these,
+  // the listener would re-subscribe every ~10s (GPS) and on each KYC snapshot,
+  // creating small windows where new SEARCHING trips weren't matched on screens
+  // other than /dashboard.
+  const vehicleCategoryRef = useRef(vehicleCategory);
+  const pendingDocsCountRef = useRef(pendingDocs.length);
+  const isDriverDisabledRef = useRef(isDriverDisabled);
+  const driverLatRef = useRef<number | null>(driverLat);
+  const driverLngRef = useRef<number | null>(driverLng);
+  useEffect(() => { vehicleCategoryRef.current = vehicleCategory; }, [vehicleCategory]);
+  useEffect(() => { pendingDocsCountRef.current = pendingDocs.length; }, [pendingDocs]);
+  useEffect(() => { isDriverDisabledRef.current = isDriverDisabled; }, [isDriverDisabled]);
+  useEffect(() => { driverLatRef.current = driverLat; }, [driverLat]);
+  useEffect(() => { driverLngRef.current = driverLng; }, [driverLng]);
+
   // ── KYC + vehicle-category listener ───────────────────────────────────────
   useEffect(() => {
     const user = auth.currentUser;
@@ -94,26 +110,37 @@ const TripRequestOverlay: React.FC = () => {
   }, [isOnline]);
 
   // ── Trip listener ─────────────────────────────────────────────────────────
+  // Depends ONLY on isOnline so the snapshot stays subscribed across GPS
+  // ticks and KYC updates. Other inputs (vehicle category, distance, etc.)
+  // are read from refs on each snapshot fire.
   useEffect(() => {
-    if (!isOnline || pendingDocs.length > 0 || isDriverDisabled) {
+    if (!isOnline) {
       setShowRequest(false);
       setCurrentRequest(null);
       return;
     }
     const q = query(collection(db, 'trips'), where('status', '==', BookingStatus.SEARCHING));
     const unsubscribe = onSnapshot(q, (snapshot) => {
+      if (pendingDocsCountRef.current > 0 || isDriverDisabledRef.current) {
+        setShowRequest(false);
+        setCurrentRequest(null);
+        return;
+      }
       if (snapshot.empty) {
         setShowRequest(false);
         setCurrentRequest(null);
         return;
       }
+      const lat = driverLatRef.current;
+      const lng = driverLngRef.current;
+      const vCat = vehicleCategoryRef.current;
       const match = snapshot.docs.find(d => {
         if (declinedTripsRef.current.has(d.id)) return false;
         const data = d.data();
         const tripVehicleId = data.vehicleId || '';
-        if (vehicleCategory && tripVehicleId !== vehicleCategory) return false;
-        if (driverLat !== null && driverLng !== null && data.pickup?.lat && data.pickup?.lng) {
-          const distKm = haversineKm(driverLat, driverLng, data.pickup.lat, data.pickup.lng);
+        if (vCat && tripVehicleId !== vCat) return false;
+        if (lat !== null && lng !== null && data.pickup?.lat && data.pickup?.lng) {
+          const distKm = haversineKm(lat, lng, data.pickup.lat, data.pickup.lng);
           if (distKm > MAX_RADIUS_KM) return false;
         }
         return true;
@@ -127,7 +154,7 @@ const TripRequestOverlay: React.FC = () => {
       }
     });
     return () => unsubscribe();
-  }, [isOnline, pendingDocs, isDriverDisabled, vehicleCategory, driverLat, driverLng]);
+  }, [isOnline]);
 
   // If status changes server-side (another driver accepted), drop the popup.
   useEffect(() => {

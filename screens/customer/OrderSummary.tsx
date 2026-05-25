@@ -189,12 +189,13 @@ const OrderSummary: React.FC = () => {
       const docRef = await addDoc(collection(db, 'trips'), tripData);
       // Best-effort: increment coupon usage. Failure here doesn't break the
       // booking — the coupon stays slightly under-counted, which is the
-      // friendlier failure mode.
+      // friendlier failure mode. tripId makes the redeem idempotent so a
+      // double-tap can't double-increment.
       if (appliedCoupon) {
         fetch('/api/redeem-coupon', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ code: appliedCoupon.code }),
+          body: JSON.stringify({ code: appliedCoupon.code, tripId: docRef.id }),
         }).catch(() => {});
       }
       navigate('/tracking', { state: { tripId: docRef.id } });

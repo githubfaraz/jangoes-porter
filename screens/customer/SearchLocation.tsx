@@ -18,18 +18,38 @@ type ViewState = 'route_summary' | 'search_selection' | 'map_picker' | 'details_
 const SearchLocation: React.FC = () => {
   const navigate = useNavigate();
   const routeLocation = useLocation();
-  const serviceType = (routeLocation.state as any)?.serviceType || 'parcels';
-  
+  const incomingState = (routeLocation.state as any) || {};
+  const serviceType = incomingState.serviceType || 'parcels';
+
+  // Convert a BookAgainState pickup/drop (from a past trip) into the local
+  // AddressDetails shape so the route summary renders pre-filled.
+  const fromBookAgain = (loc: any): AddressDetails | null => {
+    if (!loc?.address) return null;
+    return {
+      title: loc.title || (loc.address.split(',')[0] || loc.address),
+      address: loc.address,
+      building: '',
+      name: loc.name || '',
+      mobile: loc.mobile || '',
+      type: null,
+      // keep lat/lng on the object even though they're not in the type
+      lat: loc.lat,
+      lng: loc.lng,
+    } as any;
+  };
+
   // Navigation State
   const [view, setView] = useState<ViewState>('route_summary');
   const [activeEditing, setActiveEditing] = useState<'pickup' | 'drop'>('pickup');
 
-  // Address State
+  // Address State — Book Again prefill wins over localStorage.
   const [pickup, setPickup] = useState<AddressDetails | null>(() => {
+    const prefilled = fromBookAgain(incomingState.pickup);
+    if (prefilled) return prefilled;
     const saved = localStorage.getItem('JANGOES_LAST_PICKUP');
     return saved ? JSON.parse(saved) : null;
   });
-  const [drop, setDrop] = useState<AddressDetails | null>(null);
+  const [drop, setDrop] = useState<AddressDetails | null>(() => fromBookAgain(incomingState.drop));
 
   // Form Temp State
   const [tempAddress, setTempAddress] = useState<Partial<AddressDetails>>({});
@@ -279,7 +299,10 @@ const SearchLocation: React.FC = () => {
           disabled={!pickup || !drop}
           onClick={() => {
             const nextRoute = serviceType === 'exchange' ? '/exchange-details' : '/parcel-details';
-            navigate(nextRoute, { state: { pickup, drop, serviceType } });
+            // Forward any Book Again payload (parcel / dimensions / vehicle /
+            // exchange / fare) so downstream screens can pre-fill too.
+            const { pickup: _p, drop: _d, serviceType: _s, ...rest } = incomingState;
+            navigate(nextRoute, { state: { ...rest, pickup, drop, serviceType } });
           }}
           className="w-full h-16 bg-primary text-white font-black rounded-2xl shadow-xl shadow-primary/30 flex items-center justify-center gap-3 disabled:opacity-30 transition-all active:scale-[0.98]"
         >

@@ -36,8 +36,12 @@ import PendingVerification from './screens/driver/PendingVerification.tsx';
 import HelpSupport from './screens/shared/HelpSupport.tsx';
 import ChatScreen from './screens/shared/ChatScreen.tsx';
 import OrderHistory from './screens/shared/OrderHistory.tsx';
+import AllOrders from './screens/shared/AllOrders.tsx';
 import TripDetails from './screens/shared/TripDetails.tsx';
 import SetupProfile from './screens/shared/SetupProfile.tsx';
+
+// Public (no-auth) receiver tracking — opened from WhatsApp share link.
+import RecipientTracking from './screens/RecipientTracking.tsx';
 
 const App: React.FC = () => {
   const [isLoggedIn, setIsLoggedIn] = useState(false);
@@ -164,6 +168,9 @@ const App: React.FC = () => {
     <HashRouter>
       <div className="mx-auto max-w-md min-h-screen bg-background-light dark:bg-background-dark shadow-2xl relative flex flex-col overflow-x-hidden">
         <Routes>
+          {/* Public receiver page — must precede the auth branch's catch-all. */}
+          <Route path="/rd/:tripId" element={<RecipientTracking />} />
+
           {!isLoggedIn ? (
             <>
               <Route path="/auth" element={<AuthScreen onLogin={handleLogin} />} />
@@ -175,6 +182,7 @@ const App: React.FC = () => {
               <Route path="/help" element={<HelpSupport />} />
               <Route path="/chat" element={<ChatScreen />} />
               <Route path="/activity" element={<OrderHistory />} />
+              <Route path="/orders/all" element={<AllOrders />} />
               <Route path="/trip-details" element={<TripDetails />} />
 
               {userRole === UserRole.CUSTOMER ? (
@@ -235,7 +243,8 @@ const App: React.FC = () => {
         
         {isLoggedIn && ((userRole === UserRole.CUSTOMER && isProfileComplete) || (userRole === UserRole.DRIVER && isKycDone && isKycVerified)) && <BottomNav role={userRole} />}
 
-        {/* App-level new-trip popup — shows on every screen, not just /dashboard */}
+        {/* App-level new-trip popup — shows on every screen, not just /dashboard.
+            Suppressed on /rd/* since the receiver page is public. */}
         {isLoggedIn && userRole === UserRole.DRIVER && isKycDone && isKycVerified && <TripRequestOverlay />}
       </div>
     </HashRouter>
@@ -264,6 +273,8 @@ const BottomNav: React.FC<{ role: UserRole }> = ({ role }) => {
   ];
   
   if (hideOnPaths.includes(location.pathname)) return null;
+  // Receiver tracking is a public route — hide nav there too.
+  if (location.pathname.startsWith('/rd/')) return null;
 
   const items = role === UserRole.CUSTOMER ? [
     { label: 'Home', icon: 'home', path: '/home' },

@@ -216,6 +216,59 @@ app.post('/api/send-delivery-otp', async (req, res) => {
   }
 });
 
+// ─── Public Receiver Tracking Endpoint ───────────────────────────────────────
+// Backs the /rd/:tripId page. Returns a sanitized projection of the trip so
+// an unauthenticated receiver (link recipient) can see status, driver, and
+// route info — without exposing phones, OTPs, fare, or customer identifiers.
+app.get('/api/public-trip/:tripId', async (req, res) => {
+  try {
+    const { tripId } = req.params;
+    const snap = await admin.firestore().collection('trips').doc(tripId).get();
+    if (!snap.exists) return res.status(404).json({ error: 'not_found' });
+    const t: any = snap.data();
+
+    let driver: any = null;
+    if (t.driverId) {
+      try {
+        const dSnap = await admin.firestore().collection('users').doc(t.driverId).get();
+        if (dSnap.exists) {
+          const d: any = dSnap.data();
+          const kd: any = (d.kycData && typeof d.kycData === 'object') ? d.kycData : {};
+          driver = {
+            name: d.name || 'Driver',
+            photoURL: d.photoURL || kd.selfieUrl || '',
+            rcNumber: kd.rcNumber || '',
+            vehicleCategory: d.vehicleCategory || '',
+          };
+        }
+      } catch { /* driver fetch is best-effort */ }
+    }
+
+    res.json({
+      tripId,
+      status: t.status,
+      serviceType: t.serviceType || 'parcel',
+      pickup: t.pickup ? { address: t.pickup.address, lat: t.pickup.lat, lng: t.pickup.lng } : null,
+      dropoff: t.dropoff ? { address: t.dropoff.address, lat: t.dropoff.lat, lng: t.dropoff.lng } : null,
+      vehicleType: t.vehicleType || '',
+      senderName: t.senderName || '',
+      receiverName: t.receiverName || '',
+      driverLocation: t.driverLocation || null,
+      driver,
+      createdAt: t.createdAt?.toDate?.()?.toISOString?.() || t.createdAt || null,
+    });
+  } catch (err: any) {
+    console.error('[PublicTrip]', err.message);
+    res.status(500).json({ error: 'fetch_failed' });
+  }
+});
+
+// Bare-URL alias: WhatsApp shares jangoes.com/rd/<tripId> (no hash). Redirect
+// to the HashRouter route. Registered ABOVE Vite middleware so it wins.
+app.get('/rd/:tripId', (req, res) => {
+  res.redirect(302, `/#/rd/${encodeURIComponent(req.params.tripId)}`);
+});
+
 // ─── Driver Info Endpoint (for customer tracking screen) ─────────────────────
 app.get('/api/driver-info/:driverId', async (req, res) => {
   try {
@@ -450,17 +503,34 @@ app.post('/api/validate-coupon', async (req, res) => {
   }
 });
 
-// Increments coupons/{CODE}.usedCount atomically. Called by the client right
-// after a trip is created with that code. Idempotency: not built-in — repeated
-// calls will increment more than once. Acceptable for the MVP usage model.
+// Increments coupons/{CODE}.usedCount atomically, idempotently per trip.
+// Client passes `tripId`; we create coupons/{CODE}/redemptions/{tripId} inside
+// a Firestore transaction — if the doc already exists, we no-op. This makes
+// double-tap on Confirm Booking (and any retry) safe.
+//
+// Back-compat: callers that don't pass a tripId still get the old "increment
+// once per call" behavior. New OrderSummary.tsx always passes one.
 app.post('/api/redeem-coupon', async (req, res) => {
-  const { code } = req.body;
+  const { code, tripId } = req.body;
   if (!code) return res.status(400).json({ error: 'Missing code' });
   try {
     const id = String(code).toUpperCase().trim();
-    const ref = admin.firestore().collection('coupons').doc(id);
-    await ref.update({ usedCount: admin.firestore.FieldValue.increment(1) });
-    res.json({ success: true });
+    const couponRef = admin.firestore().collection('coupons').doc(id);
+
+    if (!tripId) {
+      await couponRef.update({ usedCount: admin.firestore.FieldValue.increment(1) });
+      return res.json({ success: true, idempotent: false });
+    }
+
+    const redemptionRef = couponRef.collection('redemptions').doc(String(tripId));
+    const result = await admin.firestore().runTransaction(async (tx) => {
+      const existing = await tx.get(redemptionRef);
+      if (existing.exists) return { applied: false };
+      tx.set(redemptionRef, { tripId, redeemedAt: admin.firestore.FieldValue.serverTimestamp() });
+      tx.update(couponRef, { usedCount: admin.firestore.FieldValue.increment(1) });
+      return { applied: true };
+    });
+    res.json({ success: true, applied: result.applied });
   } catch (err: any) {
     console.error('[RedeemCoupon]', err.message);
     res.status(500).json({ error: 'increment_failed' });

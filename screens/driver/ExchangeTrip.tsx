@@ -1,7 +1,8 @@
 import React, { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { db } from '../../src/firebase.ts';
+import { auth, db } from '../../src/firebase.ts';
 import { doc, updateDoc } from 'firebase/firestore';
+import { signOut } from 'firebase/auth';
 import { uploadToCloudinary } from '../../services/cloudinaryUpload.ts';
 import { BookingStatus, Trip } from '../../types.ts';
 
@@ -30,6 +31,49 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
 
   const imageInputRef = useRef<HTMLInputElement>(null);
   const qcInputRef = useRef<HTMLInputElement>(null);
+
+  // Always-available driver actions (cancel + logout) — surfaced via a 3-dot
+  // menu in the top bar so the driver isn't trapped on any in-progress screen.
+  const [showMenu, setShowMenu] = useState(false);
+  const [showCancelModal, setShowCancelModal] = useState(false);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelling, setCancelling] = useState(false);
+
+  const cancelReasons = [
+    'Vehicle breakdown',
+    'Customer/Receiver unreachable',
+    'Customer requested cancellation',
+    'Incorrect pickup/drop information',
+    'Emergency/Health issue',
+  ];
+
+  const handleCancelTrip = async () => {
+    if (!cancelReason) return;
+    setCancelling(true);
+    try {
+      await updateDoc(doc(db, 'trips', tripId), {
+        status: BookingStatus.CANCELLED,
+        cancelReason,
+        cancelledBy: 'driver',
+        updatedAt: new Date().toISOString(),
+      });
+      setShowCancelModal(false);
+      navigate('/dashboard');
+    } catch (e: any) {
+      alert('Failed to cancel: ' + (e?.message || 'Unknown error'));
+    } finally {
+      setCancelling(false);
+    }
+  };
+
+  const handleLogout = async () => {
+    try {
+      await signOut(auth);
+      navigate('/auth');
+    } catch (e: any) {
+      alert('Logout failed: ' + (e?.message || 'Unknown error'));
+    }
+  };
 
   const status = trip.status;
   const exchange = trip.exchange;
@@ -601,10 +645,16 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
             <span className="material-symbols-outlined animate-pulse">swap_horiz</span>
             <span className="text-sm font-bold">Exchange Trip</span>
           </div>
-          <button onClick={() => navigate('/chat', { state: { tripId } })}
-            className="size-11 bg-white rounded-xl shadow-md flex items-center justify-center text-primary">
-            <span className="material-symbols-outlined">chat</span>
-          </button>
+          <div className="flex items-center gap-2">
+            <button onClick={() => navigate('/chat', { state: { tripId } })}
+              className="size-11 bg-white rounded-xl shadow-md flex items-center justify-center text-primary">
+              <span className="material-symbols-outlined">chat</span>
+            </button>
+            <button onClick={() => setShowMenu(true)} aria-label="More actions"
+              className="size-11 bg-white rounded-xl shadow-md flex items-center justify-center text-slate-700">
+              <span className="material-symbols-outlined">more_vert</span>
+            </button>
+          </div>
         </div>
       </div>
 
@@ -649,6 +699,98 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
             <span className="material-symbols-outlined text-3xl">close</span>
           </button>
           <img src={fullScreenImage} alt="Product" className="max-w-full max-h-full object-contain p-4" />
+        </div>
+      )}
+
+      {/* Action menu sheet — opens from the more_vert button in the top bar */}
+      {showMenu && (
+        <div
+          className="fixed inset-0 z-[150] flex items-end justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-200"
+          onClick={() => setShowMenu(false)}
+        >
+          <div
+            className="w-full max-w-md bg-white dark:bg-slate-900 rounded-t-[32px] shadow-2xl p-6 animate-in slide-in-from-bottom duration-300"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full mx-auto mb-6" />
+            <h3 className="text-lg font-black dark:text-white mb-4">Actions</h3>
+            <div className="flex flex-col gap-2">
+              <button
+                onClick={() => { setShowMenu(false); navigate('/dashboard'); }}
+                className="w-full p-4 rounded-2xl text-left text-sm font-bold bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 flex items-center gap-3 active:scale-[0.99]"
+              >
+                <span className="material-symbols-outlined">dashboard</span>
+                Back to Dashboard
+              </button>
+              <button
+                onClick={() => { setShowMenu(false); setShowCancelModal(true); }}
+                className="w-full p-4 rounded-2xl text-left text-sm font-bold bg-red-50 dark:bg-red-950/30 text-red-600 flex items-center gap-3 active:scale-[0.99]"
+              >
+                <span className="material-symbols-outlined">cancel</span>
+                Cancel Trip
+              </button>
+              <button
+                onClick={handleLogout}
+                className="w-full p-4 rounded-2xl text-left text-sm font-bold bg-slate-50 dark:bg-slate-800 text-slate-700 dark:text-slate-200 flex items-center gap-3 active:scale-[0.99]"
+              >
+                <span className="material-symbols-outlined">logout</span>
+                Log Out
+              </button>
+              <button
+                onClick={() => setShowMenu(false)}
+                className="w-full p-4 rounded-2xl text-center text-xs font-black uppercase tracking-widest text-slate-400 mt-2"
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Cancel confirmation modal */}
+      {showCancelModal && (
+        <div className="fixed inset-0 z-[160] flex items-end justify-center bg-black/60 backdrop-blur-sm animate-in fade-in duration-300">
+          <div
+            className="w-full max-w-md bg-white dark:bg-slate-900 rounded-t-[40px] shadow-2xl p-8 animate-in slide-in-from-bottom duration-500"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="w-12 h-1.5 bg-slate-200 dark:bg-slate-700 rounded-full mx-auto mb-8" />
+            <h3 className="text-2xl font-black mb-2 dark:text-white">Cancel Trip?</h3>
+            <p className="text-sm text-slate-500 mb-6">Cancelling an active exchange will return Product 'A' to the requestor. Please select a valid reason.</p>
+
+            <div className="flex flex-col gap-3 mb-8">
+              {cancelReasons.map((reason) => (
+                <button
+                  key={reason}
+                  onClick={() => setCancelReason(reason)}
+                  className={`w-full p-4 rounded-2xl text-left text-sm font-bold transition-all border-2 ${
+                    cancelReason === reason
+                      ? 'border-red-500 bg-red-50 dark:bg-red-950/20 text-red-600'
+                      : 'border-slate-100 dark:border-slate-800 text-slate-600 dark:text-slate-400'
+                  }`}
+                >
+                  {reason}
+                </button>
+              ))}
+            </div>
+
+            <div className="flex gap-4">
+              <button
+                onClick={() => { setShowCancelModal(false); setCancelReason(''); }}
+                disabled={cancelling}
+                className="flex-1 h-14 bg-slate-100 dark:bg-slate-800 text-slate-500 font-black rounded-2xl text-xs uppercase tracking-widest disabled:opacity-50"
+              >
+                No, Back
+              </button>
+              <button
+                onClick={handleCancelTrip}
+                disabled={!cancelReason || cancelling}
+                className="flex-[2] h-14 bg-red-500 disabled:opacity-30 text-white font-black rounded-2xl text-xs uppercase tracking-widest shadow-xl shadow-red-500/20"
+              >
+                {cancelling ? 'Cancelling…' : 'Confirm Cancellation'}
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>

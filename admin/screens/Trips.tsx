@@ -9,6 +9,7 @@ interface Trip {
   status: string;
   fare: number;
   vehicleType: string;
+  serviceType?: string;
   pickup: { address: string; lat: number; lng: number };
   dropoff: { address: string; lat: number; lng: number };
   senderName: string;
@@ -17,6 +18,40 @@ interface Trip {
   pickupPin: string;
   createdAt: any;
   acceptedAt?: string;
+  // Images
+  parcelImageUrl?: string;
+  exchange?: {
+    productA?: { description?: string; images?: string[]; referencePhotos?: string[] };
+    productB?: { description?: string; images?: string[]; referencePhotos?: string[] };
+    qcChecklist?: { photos?: string[]; remarks?: string };
+  };
+}
+
+interface ImageRecord {
+  url: string;
+  uploader: 'customer' | 'driver';
+  label: string;
+}
+
+function collectTripImages(trip: Trip): ImageRecord[] {
+  const out: ImageRecord[] = [];
+  if (trip.parcelImageUrl) {
+    out.push({ url: trip.parcelImageUrl, uploader: 'driver', label: 'Parcel at pickup' });
+  }
+  const ex = trip.exchange;
+  if (ex) {
+    (ex.productA?.referencePhotos || []).forEach((u, i) =>
+      out.push({ url: u, uploader: 'customer', label: `Product 'A' reference #${i + 1}` }));
+    (ex.productB?.referencePhotos || []).forEach((u, i) =>
+      out.push({ url: u, uploader: 'customer', label: `Product 'B' reference #${i + 1}` }));
+    (ex.productA?.images || []).forEach((u, i) =>
+      out.push({ url: u, uploader: 'driver', label: `Product 'A' captured #${i + 1}` }));
+    (ex.productB?.images || []).forEach((u, i) =>
+      out.push({ url: u, uploader: 'driver', label: `Product 'B' captured #${i + 1}` }));
+    (ex.qcChecklist?.photos || []).forEach((u, i) =>
+      out.push({ url: u, uploader: 'driver', label: `QC photo #${i + 1}` }));
+  }
+  return out;
 }
 
 const ALL_STATUSES = ['ALL', 'SEARCHING', 'ACCEPTED', 'ARRIVED_AT_PICKUP', 'PICKING_UP', 'IN_TRANSIT', 'ARRIVED_AT_DESTINATION', 'DROPPING_OFF', 'COMPLETED', 'CANCELLED'];
@@ -55,6 +90,7 @@ export default function Trips() {
   const [statusFilter, setStatusFilter] = useState('ALL');
   const [search, setSearch] = useState('');
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [lightbox, setLightbox] = useState<ImageRecord | null>(null);
 
   useEffect(() => {
     const load = async () => {
@@ -235,6 +271,65 @@ export default function Trips() {
                               <p className="text-gray-700 font-mono">{trip.id}</p>
                             </div>
                           </div>
+
+                          {/* Uploaded images — grouped by uploader for audit */}
+                          {(() => {
+                            const images = collectTripImages(trip);
+                            if (images.length === 0) return null;
+                            const customerImages = images.filter(i => i.uploader === 'customer');
+                            const driverImages = images.filter(i => i.uploader === 'driver');
+                            const customerName = userMap[trip.customerId] || trip.customerId.slice(0, 10);
+                            const driverName = trip.driverId ? (userMap[trip.driverId] || trip.driverId.slice(0, 10)) : null;
+                            const renderGroup = (
+                              title: string,
+                              tint: string,
+                              uploader: 'customer' | 'driver',
+                              uploaderName: string | null,
+                              uploaderUid: string | null,
+                              items: ImageRecord[],
+                            ) => items.length > 0 && (
+                              <div className={`rounded-xl border p-3 mt-3 ${tint}`}>
+                                <div className="flex items-center justify-between mb-2">
+                                  <p className="text-[11px] font-bold text-gray-700 uppercase tracking-wide">
+                                    {title} ({items.length})
+                                  </p>
+                                  <div className="text-right">
+                                    <p className="text-[11px] font-semibold text-gray-700">{uploaderName || '—'}</p>
+                                    {uploaderUid && (
+                                      <p className="text-[10px] font-mono text-gray-400">{uploaderUid}</p>
+                                    )}
+                                  </div>
+                                </div>
+                                <div className="flex flex-wrap gap-3">
+                                  {items.map((img, i) => (
+                                    <button
+                                      key={`${uploader}-${i}`}
+                                      onClick={() => setLightbox(img)}
+                                      className="group flex flex-col items-start gap-1"
+                                      title={img.label}
+                                    >
+                                      <div className="size-24 rounded-lg overflow-hidden border border-gray-200 bg-white">
+                                        <img
+                                          src={img.url}
+                                          alt={img.label}
+                                          className="w-full h-full object-cover group-hover:opacity-80 transition-opacity"
+                                          loading="lazy"
+                                        />
+                                      </div>
+                                      <span className="text-[10px] text-gray-500 max-w-24 truncate">{img.label}</span>
+                                    </button>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                            return (
+                              <div className="mt-2">
+                                <p className="text-gray-400 font-semibold uppercase tracking-wide mb-1">Uploaded Images (audit)</p>
+                                {renderGroup('Customer uploads', 'bg-blue-50 border-blue-200', 'customer', customerName, trip.customerId, customerImages)}
+                                {renderGroup('Driver uploads', 'bg-emerald-50 border-emerald-200', 'driver', driverName, trip.driverId || null, driverImages)}
+                              </div>
+                            );
+                          })()}
                         </td>
                       </tr>
                     )}
@@ -245,6 +340,35 @@ export default function Trips() {
           </div>
         )}
       </div>
+
+      {/* Image lightbox */}
+      {lightbox && (
+        <div
+          className="fixed inset-0 z-[200] bg-black/80 flex items-center justify-center p-6"
+          onClick={() => setLightbox(null)}
+        >
+          <button
+            onClick={() => setLightbox(null)}
+            aria-label="Close"
+            className="absolute top-4 right-4 size-10 rounded-full bg-white/10 text-white flex items-center justify-center hover:bg-white/20"
+          >
+            <span className="material-symbols-outlined">close</span>
+          </button>
+          <div className="flex flex-col items-center gap-3 max-w-4xl w-full" onClick={(e) => e.stopPropagation()}>
+            <img
+              src={lightbox.url}
+              alt={lightbox.label}
+              className="max-h-[80vh] max-w-full object-contain rounded-lg"
+            />
+            <div className="bg-white/10 text-white text-xs font-medium px-3 py-1.5 rounded-full backdrop-blur">
+              <span className="opacity-70">
+                {lightbox.uploader === 'customer' ? 'Customer upload' : 'Driver upload'} •
+              </span>{' '}
+              {lightbox.label}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
