@@ -49,21 +49,30 @@ Notes on the fields:
 - **`deploy:rules` works without global firebase CLI.** Switched the script to `npx firebase-tools deploy --only firestore:rules --project jangoes-porter`.
 - **Driver TripRequestOverlay listener stability.** The new-trip listener used to re-subscribe on every GPS tick and KYC snapshot (deps included `driverLat`/`driverLng`/`pendingDocs`). Refactored to depend only on `isOnline`; other inputs read via refs inside the snapshot callback. Eliminates the brief unsubscribe-resubscribe windows that were preventing the popup from firing reliably on non-`/dashboard` screens.
 
+**Shipped to `origin/main`** (three commits)
+- `0c4412f` — firestore: check rules into repo + adminLogs rule + deploy:rules script
+- `510655e` — client+server: receiver tracking, Activity tab UX, exchange driver actions, admin image audit, listener stability
+- `89810f5` — docs: PROGRESS audit (2026-05-24) + session log (2026-05-25), CLAUDE.md communication rules, harness allowlist
+
 **In progress**
-- _(none — all changes ready to commit)_
+- _(none — repo is clean, all work committed and pushed)_
 
 **Next**
-- After commit + push: run `npm run deploy:rules` so the `adminLogs` rule lands in the Console.
-- SMTP credentials for Mail Invoice (Open Q #1) still outstanding.
+- **Run `npm run deploy:rules`** so the `adminLogs` rule lands in the Firebase Console — the Activity Logs admin page will keep throwing the permission error until then.
+- SMTP credentials for Mail Invoice (Open Q #1) still outstanding — until set, both the customer-side Mail Invoice buttons (Activity rows + Trip Details) return `503 email_not_configured`.
+- User acceptance test of today's UX changes (Activity 5-row + View All pagination, exchange OTP card, driver Exchange cancel/logout menu, admin image gallery).
+
+**New open questions raised today**
+- _(none beyond what was already in the carried-forward list)_
 
 **Open questions carried forward**
-- **#1 SMTP credentials for Mail Invoice.**
-- **#2 DLT template for receiver pickup OTP.**
+- **#1 SMTP credentials for Mail Invoice.** Set `SMTP_HOST/PORT/USER/PASS/FROM` in `.env`; Gmail App Password path documented in earlier 2026-05-04 entry.
+- **#2 DLT template for receiver pickup OTP.** Driver Exchange flow still uses the generic delivery-OTP template; needs a dedicated DLT template registered + `SMS_TEMPLATE_ID` swap (or new `SMS_RECEIVER_PICKUP_TEMPLATE_ID`).
 
 **Files touched today**
 - New: `screens/shared/AllOrders.tsx`
 - Modified: `App.tsx`, `package.json`, `firestore.rules`, `admin/screens/Trips.tsx`, `screens/customer/Tracking.tsx`, `screens/driver/ExchangeTrip.tsx`, `screens/driver/TripRequestOverlay.tsx`, `screens/shared/OrderHistory.tsx`
-- Docs: `docs/PROGRESS.md` (this entry)
+- Docs: `docs/PROGRESS.md` (this entry + 2026-05-24 audit entry above)
 
 ---
 
