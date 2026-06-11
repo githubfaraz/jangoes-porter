@@ -19,6 +19,8 @@ export const PERMISSIONS: AdminPermissionDef[] = [
   { key: 'fare_config.edit',label: 'Edit Fare Config',     description: 'Modify vehicle fare rates',           group: 'Fare Config' },
   { key: 'coupons',         label: 'View Coupons',         description: 'View coupon list and usage',          group: 'Coupons' },
   { key: 'coupons.edit',    label: 'Manage Coupons',       description: 'Create, edit, delete, activate',      group: 'Coupons' },
+  { key: 'settlements',     label: 'View Settlements',     description: 'View driver settlement balances',     group: 'Settlements' },
+  { key: 'settlements.settle', label: 'Record Settlements', description: 'Mark driver balances as settled',    group: 'Settlements' },
 ];
 
 export const PERMISSION_GROUPS = [...new Set(PERMISSIONS.map(p => p.group))];

@@ -15,7 +15,10 @@ interface Trip {
   senderName: string;
   receiverName: string;
   receiverPhone: string;
+  // PINs / OTPs used across the trip lifecycle
   pickupPin: string;
+  dropoffOtp?: string;
+  paymentMethod?: string;
   createdAt: any;
   acceptedAt?: string;
   // Images
@@ -24,7 +27,27 @@ interface Trip {
     productA?: { description?: string; images?: string[]; referencePhotos?: string[] };
     productB?: { description?: string; images?: string[]; referencePhotos?: string[] };
     qcChecklist?: { photos?: string[]; remarks?: string };
+    returnOtp?: string;
+    productBPickupOtp?: string;
+    productAHandoverOtp?: string;
   };
+}
+
+// Every PIN/OTP a trip uses, with a human label. Exchange trips have extra OTPs.
+function collectTripCodes(trip: Trip): Array<{ label: string; value?: string }> {
+  const codes: Array<{ label: string; value?: string }> = [
+    { label: 'Pickup PIN', value: trip.pickupPin },
+    { label: 'Delivery OTP', value: trip.dropoffOtp },
+  ];
+  const ex = trip.exchange;
+  if (ex) {
+    codes.push(
+      { label: "Product 'A' Handover OTP", value: ex.productAHandoverOtp },
+      { label: "Product 'B' Pickup OTP", value: ex.productBPickupOtp },
+      { label: 'Return OTP', value: ex.returnOtp },
+    );
+  }
+  return codes.filter(c => c.value);
 }
 
 interface ImageRecord {
@@ -263,14 +286,36 @@ export default function Trips() {
                               <p className="text-gray-700">{trip.receiverName || '—'} · {trip.receiverPhone || '—'}</p>
                             </div>
                             <div>
-                              <p className="text-gray-400 font-semibold uppercase tracking-wide mb-1">Pickup PIN</p>
-                              <p className="text-gray-700 font-mono font-bold">{trip.pickupPin || '—'}</p>
+                              <p className="text-gray-400 font-semibold uppercase tracking-wide mb-1">Payment</p>
+                              <p className="text-gray-700 capitalize">{trip.paymentMethod || 'cash'}</p>
                             </div>
                             <div>
                               <p className="text-gray-400 font-semibold uppercase tracking-wide mb-1">Full Trip ID</p>
                               <p className="text-gray-700 font-mono">{trip.id}</p>
                             </div>
                           </div>
+
+                          {/* All PINs & OTPs used in this trip */}
+                          {(() => {
+                            const codes = collectTripCodes(trip);
+                            if (codes.length === 0) return null;
+                            return (
+                              <div className="mt-3 rounded-xl border border-amber-200 bg-amber-50 p-3">
+                                <p className="text-amber-700 font-semibold uppercase tracking-wide text-[11px] mb-2 flex items-center gap-1">
+                                  <span className="material-symbols-outlined text-sm align-middle">password</span>
+                                  PINs &amp; OTPs ({codes.length})
+                                </p>
+                                <div className="flex flex-wrap gap-2">
+                                  {codes.map(c => (
+                                    <div key={c.label} className="bg-white border border-amber-200 rounded-lg px-3 py-1.5">
+                                      <p className="text-[10px] text-gray-400 font-semibold uppercase tracking-wide">{c.label}</p>
+                                      <p className="text-gray-800 font-mono font-bold text-base tracking-widest">{c.value}</p>
+                                    </div>
+                                  ))}
+                                </div>
+                              </div>
+                            );
+                          })()}
 
                           {/* Uploaded images — grouped by uploader for audit */}
                           {(() => {
