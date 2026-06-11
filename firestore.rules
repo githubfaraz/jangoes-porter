@@ -82,6 +82,14 @@ service cloud.firestore {
       allow write: if isAdmin();
     }
 
+    // ─── settlements ─────────────────────────────────────────────────────
+    // Driver ↔ Jangoes settlement records. Admin SPA creates them (client SDK,
+    // batched with the trip `settled` flag). Drivers read their own (Payouts).
+    match /settlements/{id} {
+      allow read:  if isSignedIn() && (resource.data.driverId == request.auth.uid || isAdmin());
+      allow write: if isAdmin();
+    }
+
     // ─── adminLogs audit log ─────────────────────────────────────────────
     // Written by every admin mutation via logAdminAction() in
     // admin/services/activityLog.ts. Read-only by Super Admins via
