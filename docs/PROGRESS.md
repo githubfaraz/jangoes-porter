@@ -36,6 +36,44 @@ Notes on the fields:
 
 ---
 
+## 2026-06-11 — Session start (resync)
+
+**Status**
+- Resync session. Working tree clean at start; last shipped work is the 2026-05-25 batch (commits `0c4412f`, `510655e`, `89810f5`, `26b9773`), all on `origin/main`. No drift between PROGRESS and `git status`.
+
+**Done (uncommitted)** — 6 client requirements
+
+1. **Driver history — Mail Invoice + Book Again removed.** `OrderHistory.tsx` + `AllOrders.tsx` now take a `role` prop (passed from `App.tsx`); both buttons (ongoing mail icon + past-row Mail Invoice/Book Again) are hidden when `role === DRIVER`. Customer view unchanged.
+2. **Payouts — "today total wrong" fixed + pagination.** Root cause: `ExchangeTrip` never wrote `completedAt`, so exchange earnings were dropped by the date filter. Fixed both ends: exchange completion now writes `completedAt`, and Payouts uses a robust `tripTime()` fallback (`completedAt → updatedAt → createdAt`, handles Timestamp + ISO). Transaction history now paginates 8/page.
+3. **Payment mode shown to driver.** New `src/settlement.ts` `paymentLabel/paymentIcon/isCashPayment`. Shown in the trip popup (`TripRequestOverlay`, "Collect Cash"/"Prepaid" chip), and on completion in `ActiveTrip` + both `ExchangeTrip` terminal screens. App stores `cash`/`wallet`/`upi`; wallet+upi collapse to "Online" per the fares PDF (§6 Cash or Online).
+4. **Payouts — Today/Week split + monthly.** Today and This Week boxes show big total + `Online ₹X · Cash ₹Y` split. New month-wise earnings list (per-month total + split). Total Earnings header also shows the split.
+5. **Driver↔Jangoes settlement system.** Commission = flat **20%** (client-confirmed; in `src/settlement.ts COMMISSION_RATE`). Cash trips: driver keeps cash, owes 20% commission. Online trips: Jangoes owes driver 80%. Net'd into one balance. Driver sees a Settlement card in Payouts (owe/owed + breakdown + last settlement). New admin **Settlements** page: per-driver pending balances, "Mark Settled" → batched write (creates `settlements/{id}` + flags each trip `settled`), logged via `logAdminAction`; plus settlement history. New rbac perms `settlements` / `settlements.settle`, sidebar nav, route. `firestore.rules` gets a `settlements` collection (driver reads own, admin writes).
+6. **Admin Trips — all PINs/OTPs.** Expanded row replaced the single "Pickup PIN" with a "PINs & OTPs" panel: Pickup PIN, Delivery OTP, and (exchange) Product 'A' Handover / Product 'B' Pickup / Return OTPs. Also added a Payment field.
+
+**Decisions captured (client, 2026-06-11)** — none of this was in the fares PDF:
+- Commission: flat 20% of fare (driver earns 80%).
+- Settlement: admin marks as settled (no driver-request queue).
+- Cash model: driver keeps cash & owes commission; net against online earnings owed.
+
+**Verification**
+- `npm run lint` (tsc --noEmit): zero NEW errors. The 15 reported errors all pre-exist on a clean `git stash` baseline (google namespace, `import.meta.env`, RegistrationFlow) — none in touched files.
+
+**Next**
+- **Run `npm run deploy:rules`** — the new `settlements` rule must land in Console or the driver Payouts settlement listener + admin settle write will be denied. (Carries the still-pending `adminLogs` deploy from 2026-05-25.)
+- User acceptance test: driver history (no buttons), Payouts today/week/monthly + settlement card, popup/completion payment chip, admin Settlements flow, admin Trips PIN/OTP panel.
+- Commit in logical groups once accepted.
+
+**Open questions carried forward** (both confirmed blocked on client)
+- **#1 SMTP credentials for Mail Invoice** — set `SMTP_HOST/PORT/USER/PASS/FROM` in `.env`. **Due on client's end.**
+- **#2 DLT template for receiver pickup OTP** — dedicated DLT template + `SMS_TEMPLATE_ID` swap. **Due on client's end.**
+
+**Files touched today**
+- New: `src/settlement.ts`, `admin/screens/Settlements.tsx`
+- Modified: `types.ts`, `App.tsx`, `firestore.rules`, `screens/shared/OrderHistory.tsx`, `screens/shared/AllOrders.tsx`, `screens/driver/Payouts.tsx`, `screens/driver/TripRequestOverlay.tsx`, `screens/driver/ActiveTrip.tsx`, `screens/driver/ExchangeTrip.tsx`, `admin/screens/Trips.tsx`, `admin/rbac.ts`, `admin/App.tsx`, `admin/screens/Layout.tsx`
+- Docs: `docs/PROGRESS.md`
+
+---
+
 ## 2026-05-25 — Activity tab UX, exchange driver actions, admin image audit, listener stability
 
 **Done**
