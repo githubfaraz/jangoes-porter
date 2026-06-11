@@ -102,8 +102,12 @@ export interface Trip {
     gst: number;
     total: number;
   };
-  paymentMethod?: 'cash' | 'online';
+  paymentMethod?: 'cash' | 'online' | 'wallet' | 'upi';
   paymentConfirmed?: boolean;
+  // Settlement (driver ↔ Jangoes). Set when an admin records a settlement that
+  // includes this trip. See src/settlement.ts for the commission/netting rules.
+  settled?: boolean;
+  settlementId?: string;
   serverValidatedFare?: number;
   // Coupon redemption — set on trip creation when the customer applies a code
   // in OrderSummary. couponDiscount is the amount deducted from `fare`.
@@ -138,4 +142,26 @@ export interface Trip {
     productBPickupOtp?: string;
     productAHandoverOtp?: string;
   };
+}
+
+// A recorded settlement between a driver and Jangoes. Created by an admin
+// (admin/screens/Settlements.tsx); zeroes out the driver's running balance by
+// marking every included trip as settled.
+export interface Settlement {
+  id?: string;
+  driverId: string;
+  driverName: string;
+  // Net amount of this settlement. direction tells you who paid whom.
+  amount: number;
+  direction: 'driver_to_jangoes' | 'jangoes_to_driver' | 'nil';
+  cashCollected: number;
+  cashCommission: number;
+  onlineCollected: number;
+  onlineEarnings: number;
+  tripCount: number;
+  tripIds: string[];
+  note?: string;
+  createdAt: any;
+  createdByUid: string;
+  createdByName: string;
 }
