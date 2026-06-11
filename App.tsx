@@ -181,8 +181,8 @@ const App: React.FC = () => {
             <>
               <Route path="/help" element={<HelpSupport />} />
               <Route path="/chat" element={<ChatScreen />} />
-              <Route path="/activity" element={<OrderHistory />} />
-              <Route path="/orders/all" element={<AllOrders />} />
+              <Route path="/activity" element={<OrderHistory role={userRole} />} />
+              <Route path="/orders/all" element={<AllOrders role={userRole} />} />
               <Route path="/trip-details" element={<TripDetails />} />
 
               {userRole === UserRole.CUSTOMER ? (

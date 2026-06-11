@@ -18,6 +18,7 @@ import { collection, query, where, onSnapshot, doc, updateDoc, getDoc } from 'fi
 import { BookingStatus, Trip } from '../../types.ts';
 import { extractKycData } from '../../services/kycHelper.ts';
 import { useDriverOnline } from '../../src/driverOnline.ts';
+import { paymentLabel, paymentIcon, isCashPayment } from '../../src/settlement.ts';
 
 const MAX_RADIUS_KM = 5;
 
@@ -221,6 +222,18 @@ const TripRequestOverlay: React.FC = () => {
               <span className="text-[9px] font-black opacity-70 uppercase tracking-widest">Sender</span>
               <span className="text-sm font-black">{currentRequest.senderName || 'Customer'}</span>
             </div>
+          </div>
+
+          {/* Payment mode — tells the driver whether to collect cash on delivery */}
+          <div className="mt-5 flex items-center gap-2 bg-white/15 border border-white/20 rounded-2xl px-4 py-3 backdrop-blur-md">
+            <span className="material-symbols-outlined text-xl">{paymentIcon(currentRequest.paymentMethod)}</span>
+            <div className="flex flex-col">
+              <span className="text-[9px] font-black opacity-70 uppercase tracking-widest">Payment Mode</span>
+              <span className="text-sm font-black">{paymentLabel(currentRequest.paymentMethod)}</span>
+            </div>
+            <span className="ml-auto text-[10px] font-black uppercase tracking-widest px-2.5 py-1 rounded-full bg-white/20">
+              {isCashPayment(currentRequest.paymentMethod) ? 'Collect Cash' : 'Prepaid'}
+            </span>
           </div>
         </div>
 

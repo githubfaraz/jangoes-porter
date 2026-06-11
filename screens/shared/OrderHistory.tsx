@@ -2,7 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { auth, db } from '../../src/firebase.ts';
 import { collection, query, where, onSnapshot } from 'firebase/firestore';
-import { BookingStatus, Trip } from '../../types.ts';
+import { BookingStatus, Trip, UserRole } from '../../types.ts';
 import { buildBookAgainState } from '../../src/bookAgain.ts';
 
 const ONGOING_STATUSES = [
@@ -68,8 +68,10 @@ function statusPill(s: BookingStatus): { label: string; color: string; icon: str
   return { label: 'Ongoing', color: 'text-blue-600', icon: 'pending' };
 }
 
-const OrderHistory: React.FC = () => {
+const OrderHistory: React.FC<{ role?: UserRole }> = ({ role }) => {
   const navigate = useNavigate();
+  // Drivers don't book or pay, so Mail Invoice + Book Again are customer-only.
+  const isDriver = role === UserRole.DRIVER;
   const [trips, setTrips] = useState<(Trip & { id: string })[]>([]);
   const [loading, setLoading] = useState(true);
   const [mailingTripId, setMailingTripId] = useState<string | null>(null);
@@ -179,16 +181,18 @@ const OrderHistory: React.FC = () => {
                       </div>
                       <span className="text-sm font-black text-slate-900 dark:text-white">₹{trip.fare?.toFixed(0) || '0'}</span>
                     </button>
-                    <button
-                      onClick={() => handleMailInvoice(trip)}
-                      disabled={mailingTripId === trip.id}
-                      aria-label="Mail invoice"
-                      className="size-9 rounded-full border border-primary text-primary flex items-center justify-center active:scale-95 transition-transform disabled:opacity-50 shrink-0"
-                    >
-                      <span className="material-symbols-outlined text-base">
-                        {mailingTripId === trip.id ? 'hourglass_top' : 'mail'}
-                      </span>
-                    </button>
+                    {!isDriver && (
+                      <button
+                        onClick={() => handleMailInvoice(trip)}
+                        disabled={mailingTripId === trip.id}
+                        aria-label="Mail invoice"
+                        className="size-9 rounded-full border border-primary text-primary flex items-center justify-center active:scale-95 transition-transform disabled:opacity-50 shrink-0"
+                      >
+                        <span className="material-symbols-outlined text-base">
+                          {mailingTripId === trip.id ? 'hourglass_top' : 'mail'}
+                        </span>
+                      </button>
+                    )}
                     <button
                       onClick={() => navigate('/tracking', { state: { tripId: trip.id } })}
                       aria-label="Open tracking"
@@ -301,24 +305,26 @@ const OrderHistory: React.FC = () => {
                             <span className="material-symbols-outlined text-base">{pill.icon}</span>
                             <span className="text-sm font-bold truncate">{pill.label}</span>
                           </div>
-                          <div className="flex items-center gap-2 shrink-0">
-                            <button
-                              onClick={() => handleMailInvoice(trip)}
-                              disabled={mailingTripId === trip.id}
-                              className="px-3 h-10 border border-primary text-primary text-xs font-bold rounded-xl active:scale-[0.98] transition-transform disabled:opacity-50 flex items-center gap-1.5"
-                            >
-                              <span className="material-symbols-outlined text-base">
-                                {mailingTripId === trip.id ? 'hourglass_top' : 'mail'}
-                              </span>
-                              {mailingTripId === trip.id ? 'Sending…' : 'Mail Invoice'}
-                            </button>
-                            <button
-                              onClick={() => navigate('/search', { state: buildBookAgainState(trip) })}
-                              className="px-4 h-10 bg-primary text-white text-sm font-bold rounded-xl active:scale-[0.98] transition-transform"
-                            >
-                              Book Again
-                            </button>
-                          </div>
+                          {!isDriver && (
+                            <div className="flex items-center gap-2 shrink-0">
+                              <button
+                                onClick={() => handleMailInvoice(trip)}
+                                disabled={mailingTripId === trip.id}
+                                className="px-3 h-10 border border-primary text-primary text-xs font-bold rounded-xl active:scale-[0.98] transition-transform disabled:opacity-50 flex items-center gap-1.5"
+                              >
+                                <span className="material-symbols-outlined text-base">
+                                  {mailingTripId === trip.id ? 'hourglass_top' : 'mail'}
+                                </span>
+                                {mailingTripId === trip.id ? 'Sending…' : 'Mail Invoice'}
+                              </button>
+                              <button
+                                onClick={() => navigate('/search', { state: buildBookAgainState(trip) })}
+                                className="px-4 h-10 bg-primary text-white text-sm font-bold rounded-xl active:scale-[0.98] transition-transform"
+                              >
+                                Book Again
+                              </button>
+                            </div>
+                          )}
                         </div>
                       </div>
                     );

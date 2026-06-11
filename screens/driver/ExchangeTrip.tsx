@@ -5,6 +5,7 @@ import { doc, updateDoc } from 'firebase/firestore';
 import { signOut } from 'firebase/auth';
 import { uploadToCloudinary } from '../../services/cloudinaryUpload.ts';
 import { BookingStatus, Trip } from '../../types.ts';
+import { paymentLabel, paymentIcon, isCashPayment } from '../../src/settlement.ts';
 
 interface Props {
   trip: Trip;
@@ -176,6 +177,11 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
         <h2 className="text-3xl font-black mb-2">Exchange Complete!</h2>
         <p className="text-slate-500 mb-2">Products exchanged successfully.</p>
         <div className="w-full bg-slate-50 rounded-3xl p-6 mb-8">
+          <div className={`flex items-center gap-2 rounded-2xl px-4 py-3 mb-3 ${isCashPayment((trip as any).paymentMethod) ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
+            <span className="material-symbols-outlined text-xl">{paymentIcon((trip as any).paymentMethod)}</span>
+            <span className="text-sm font-black">{paymentLabel((trip as any).paymentMethod)}</span>
+            <span className="ml-auto text-[10px] font-black uppercase tracking-widest">{isCashPayment((trip as any).paymentMethod) ? 'Cash Collected' : 'Prepaid'}</span>
+          </div>
           <div className="flex justify-between mb-2"><span className="text-slate-400 font-bold text-xs uppercase">Earnings</span><span className="font-black text-xl">₹{trip.fare?.toFixed(2)}</span></div>
         </div>
         <button onClick={() => navigate('/dashboard')} className="w-full h-16 bg-primary text-white font-black rounded-2xl shadow-xl">BACK TO DASHBOARD</button>
@@ -193,6 +199,11 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
         <p className="text-slate-500 mb-2">Product 'A' has been safely returned to the requestor.</p>
         <p className="text-xs text-slate-400 mb-8">Reason: {exchange?.failureReason?.replace(/_/g, ' ') || 'Unknown'}</p>
         <div className="w-full bg-slate-50 rounded-3xl p-6 mb-8">
+          <div className={`flex items-center gap-2 rounded-2xl px-4 py-3 mb-3 ${isCashPayment((trip as any).paymentMethod) ? 'bg-amber-100 text-amber-700' : 'bg-green-100 text-green-700'}`}>
+            <span className="material-symbols-outlined text-xl">{paymentIcon((trip as any).paymentMethod)}</span>
+            <span className="text-sm font-black">{paymentLabel((trip as any).paymentMethod)}</span>
+            <span className="ml-auto text-[10px] font-black uppercase tracking-widest">{isCashPayment((trip as any).paymentMethod) ? 'Cash Collected' : 'Prepaid'}</span>
+          </div>
           <div className="flex justify-between"><span className="text-slate-400 font-bold text-xs uppercase">Earnings</span><span className="font-black text-xl">₹{trip.fare?.toFixed(2)}</span></div>
         </div>
         <button onClick={() => navigate('/dashboard')} className="w-full h-16 bg-primary text-white font-black rounded-2xl shadow-xl">BACK TO DASHBOARD</button>
@@ -617,7 +628,7 @@ const ExchangeTrip: React.FC<Props> = ({ trip, tripId, customerName, customerPho
           </div>
           <button onClick={() => {
             if (returnOtpInput !== exchange?.returnOtp) { alert('Invalid OTP'); return; }
-            update(isSuccess ? BookingStatus.EXCHANGE_COMPLETED : BookingStatus.EXCHANGE_FAILED);
+            update(isSuccess ? BookingStatus.EXCHANGE_COMPLETED : BookingStatus.EXCHANGE_FAILED, { completedAt: new Date().toISOString() });
           }} disabled={loading}
             className={`w-full h-16 text-white font-black rounded-2xl shadow-xl flex items-center justify-center gap-2 disabled:opacity-50 ${isSuccess ? 'bg-green-600' : 'bg-amber-500'}`}>
             <span className="material-symbols-outlined">verified</span>

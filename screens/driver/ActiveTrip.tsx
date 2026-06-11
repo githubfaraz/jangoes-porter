@@ -5,6 +5,7 @@ import { doc, onSnapshot, updateDoc, getDoc } from 'firebase/firestore';
 import { uploadToCloudinary } from '../../services/cloudinaryUpload.ts';
 import { BookingStatus, Trip } from '../../types.ts';
 import { getVehicleRates, calculateFinalFare } from '../../services/fareService.ts';
+import { paymentLabel, paymentIcon, isCashPayment } from '../../src/settlement.ts';
 import ExchangeTrip from './ExchangeTrip.tsx';
 
 enum TripStep {
@@ -279,6 +280,17 @@ const ActiveTrip: React.FC = () => {
         <p className="text-slate-500 mb-2">You've successfully delivered the parcel. Great job!</p>
 
         <div className="w-full bg-slate-50 dark:bg-slate-900 rounded-3xl p-6 mb-8">
+          {/* Payment mode — tells the driver whether they collected cash */}
+          <div className={`flex items-center gap-2 rounded-2xl px-4 py-3 mb-4 ${isCashPayment((trip as any)?.paymentMethod) ? 'bg-amber-50 dark:bg-amber-900/20 text-amber-700 dark:text-amber-400' : 'bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-400'}`}>
+            <span className="material-symbols-outlined text-xl">{paymentIcon((trip as any)?.paymentMethod)}</span>
+            <div className="flex flex-col text-left">
+              <span className="text-[9px] font-black uppercase tracking-widest opacity-70">Payment Mode</span>
+              <span className="text-sm font-black">{paymentLabel((trip as any)?.paymentMethod)}</span>
+            </div>
+            <span className="ml-auto text-[10px] font-black uppercase tracking-widest">
+              {isCashPayment((trip as any)?.paymentMethod) ? 'Cash Collected' : 'Prepaid'}
+            </span>
+          </div>
           <div className="flex justify-between mb-3">
             <span className="text-slate-400 font-bold uppercase text-[10px] tracking-widest">Total Earnings</span>
             <span className="font-black text-xl text-slate-900 dark:text-white">₹{trip?.fare?.toFixed(2) || '0.00'}</span>
