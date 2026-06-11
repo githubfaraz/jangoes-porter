@@ -36,12 +36,19 @@ Notes on the fields:
 
 ---
 
-## 2026-06-11 — Session start (resync)
+## 2026-06-11 — Six client requirements shipped (history, payouts, payment mode, settlement, admin trips)
 
 **Status**
-- Resync session. Working tree clean at start; last shipped work is the 2026-05-25 batch (commits `0c4412f`, `510655e`, `89810f5`, `26b9773`), all on `origin/main`. No drift between PROGRESS and `git status`.
+- Started as a resync (clean tree off the 2026-05-25 batch), then delivered all six client requirements below. Everything is **committed and pushed to `origin/main`**, and the new Firestore rules are **deployed to the Console**. Working tree clean.
 
-**Done (uncommitted)** — 6 client requirements
+**Shipped to `origin/main`** (range `26b9773..2572d84`)
+- `27fbe71` — shared: settlement/payment helpers + Trip settlement fields
+- `d70f75b` — client: driver history cleanup, payouts rebuild, payment-mode + settlement card
+- `d382d72` — admin: driver settlement page + Trips PIN/OTP audit
+- `81e980a` — firestore: settlements collection rule (driver reads own, admin writes)
+- `2572d84` — docs: PROGRESS 2026-06-11
+
+**Done** — 6 client requirements
 
 1. **Driver history — Mail Invoice + Book Again removed.** `OrderHistory.tsx` + `AllOrders.tsx` now take a `role` prop (passed from `App.tsx`); both buttons (ongoing mail icon + past-row Mail Invoice/Book Again) are hidden when `role === DRIVER`. Customer view unchanged.
 2. **Payouts — "today total wrong" fixed + pagination.** Root cause: `ExchangeTrip` never wrote `completedAt`, so exchange earnings were dropped by the date filter. Fixed both ends: exchange completion now writes `completedAt`, and Payouts uses a robust `tripTime()` fallback (`completedAt → updatedAt → createdAt`, handles Timestamp + ISO). Transaction history now paginates 8/page.
@@ -57,15 +64,21 @@ Notes on the fields:
 
 **Verification**
 - `npm run lint` (tsc --noEmit): zero NEW errors. The 15 reported errors all pre-exist on a clean `git stash` baseline (google namespace, `import.meta.env`, RegistrationFlow) — none in touched files.
+- `npm run deploy:rules` run — `firestore.rules` compiled + released to `jangoes-porter` (settlements + adminLogs now live in Console). Confirmed it fully replaces the published ruleset; repo file was the source of truth so nothing was lost.
+
+**In progress**
+- _(none — all six requirements committed, pushed, and rules deployed)_
 
 **Next**
-- **Run `npm run deploy:rules`** — the new `settlements` rule must land in Console or the driver Payouts settlement listener + admin settle write will be denied. (Carries the still-pending `adminLogs` deploy from 2026-05-25.)
-- User acceptance test: driver history (no buttons), Payouts today/week/monthly + settlement card, popup/completion payment chip, admin Settlements flow, admin Trips PIN/OTP panel.
-- Commit in logical groups once accepted.
+- **User acceptance test** of the six changes: driver history (no Mail Invoice/Book Again), Payouts today/week/monthly + settlement balance card, popup + completion payment-mode chip, admin Settlements flow (mark-settled batch + history), admin Trips PIN/OTP panel.
+- Settlement is netted live from unsettled trips; first real admin settlement will validate the batch write + `settled` flag end-to-end.
 
 **Open questions carried forward** (both confirmed blocked on client)
 - **#1 SMTP credentials for Mail Invoice** — set `SMTP_HOST/PORT/USER/PASS/FROM` in `.env`. **Due on client's end.**
 - **#2 DLT template for receiver pickup OTP** — dedicated DLT template + `SMS_TEMPLATE_ID` swap. **Due on client's end.**
+
+**New open questions raised today**
+- _(none — commission rate (20%), settlement flow (admin-marks-settled), and cash model (driver keeps cash, owes commission) were all resolved by the client during this session and are recorded under "Decisions captured" above.)_
 
 **Files touched today**
 - New: `src/settlement.ts`, `admin/screens/Settlements.tsx`
