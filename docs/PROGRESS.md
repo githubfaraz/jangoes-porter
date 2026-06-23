@@ -36,6 +36,33 @@ Notes on the fields:
 
 ---
 
+## 2026-06-23 — Resync + diagnosed Google Maps billing outage
+
+**Status**
+- Resync session off the clean 2026-06-11 batch. No code changes. Diagnosed a Google Maps failure reported by the client. Working tree clean.
+
+**Done**
+- **Diagnosed map outage as `BillingNotEnabledMapError`.** Client reported "Current Location" / "Choose on Map" failing with *"This page can't load Google Maps correctly"* and the *"For development purposes only"* watermark. Browser console confirmed `BillingNotEnabledMapError` plus repeated "Geocoding Service: You must enable Billing" errors. **Not a code bug** — billing is disabled on the `jangoes-porter` Google Cloud project. Fix is owner-side: enable billing at console.cloud.google.com/billing, confirm Maps JavaScript + Places + Geocoding APIs enabled, hard-refresh. The `VITE_GOOGLE_MAPS_API_KEY` is valid (map tiles render under the watermark).
+
+**In progress**
+- _(none — diagnosis only, no edits)_
+
+**Next**
+- Client/GCP owner enables billing on `jangoes-porter`, then re-test location picker.
+- Still pending UAT of the 2026-06-11 six-requirement batch.
+
+**Open questions carried forward** (both still blocked on client — no movement confirmed this session)
+- **#1 SMTP credentials for Mail Invoice** — set `SMTP_HOST/PORT/USER/PASS/FROM` in `.env`. Due on client's end.
+- **#2 DLT template for receiver pickup OTP** — dedicated DLT template + `SMS_TEMPLATE_ID` swap. Due on client's end.
+
+**New open questions raised today**
+- **#3 Google Maps billing** — billing must be enabled on the `jangoes-porter` GCP project for the map/location picker to work. Due on client/account owner.
+
+**Files touched today**
+- Docs: `docs/PROGRESS.md` (this entry only)
+
+---
+
 ## 2026-06-11 — Six client requirements shipped (history, payouts, payment mode, settlement, admin trips)
 
 **Status**
