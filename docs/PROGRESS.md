@@ -36,6 +36,22 @@ Notes on the fields:
 
 ---
 
+## 2026-10-26 — Google Maps billing outage resolved
+
+**Done**
+- **Maps billing fixed (owner-side, no code change).** Root cause: `VITE_GOOGLE_MAPS_API_KEY` lives in GCP project **#884086040096**, *not* in `jangoes-porter` (#920708068169, the Firebase project). Billing was first linked to the wrong projects (`gen-lang-client-0589909076`, then `jangoes-porter`), so nothing changed. Once billing was linked to the key's own project (My Billing Account 3), Geocoding + Places Autocomplete both returned `OK`.
+- Key's project #884086040096 = `gen-lang-client-0589909076` (key name `jangoes-porter-map-service`). Budget alert "Jangoes-Porter-Budgets" created. Key API restrictions now: Maps JS, Places, Geocoding, **Distance Matrix** (was missing → `server.ts` fare/distance calls were `REQUEST_DENIED`). App restriction left at None because `server.ts` uses the same key with no referrer — a website restriction needs a separate server key first.
+- Tip: to find a key's project, call a non-enabled Maps API (e.g. Routes) with it — the error shows `projects/<number>`.
+
+**Next**
+- Re-test "Current Location" / "Choose on Map" in the app (dev server was off; checked via REST only).
+- Still pending: UAT of the 2026-06-11 batch; open questions #1 (SMTP) and #2 (DLT template). #3 (Maps billing) is closed.
+
+**Files touched**
+- Docs: `docs/PROGRESS.md` (this entry only)
+
+---
+
 ## 2026-06-23 — Resync + diagnosed Google Maps billing outage
 
 **Status**
